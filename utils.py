@@ -77,6 +77,13 @@ def split_data(num, train_ratio):
     return perm[:train], perm[train:]
 
 
-if __name__ == '__main__':
+def check_ratio(name, value):
+    """ Checks whether input is in interval [0, 1]. Otherwise raises exception"""
+    if value < 0 or value > 1:
+        raise ValueError("Parameter %s must be in interval [0,1] but is %f" % value)
 
-    download_data()
+
+def jaccard_similarity(labels1, labels2):
+    """ Returns the Jaccard index between two vectors of labels"""
+    lab_set1, lab_set2 = set(labels1), set(labels2)
+    return len(lab_set1.intersection(lab_set2)) / len(set(lab_set1).union(lab_set2))
