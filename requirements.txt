@@ -22,7 +22,6 @@ diagnostic-updater==1.8.10
 dynamic-reconfigure==1.5.45
 entrypoints==0.2.2
 enum34==1.1.6
-functools32==3.2.3.post2
 gazebo-plugins==2.4.11
 gazebo-ros==2.4.11
 gencpp==0.5.5
@@ -122,8 +121,8 @@ rqt-topic==0.4.3
 rqt-web==0.4.3
 rviz==1.11.15
 scandir==1.4
-scikit-learn==0.18.1
 scipy==0.18.1
+scikit-learn==0.18.1
 sensor-msgs==1.11.9
 simplegeneric==0.8.1
 singledispatch==3.4.0.3
