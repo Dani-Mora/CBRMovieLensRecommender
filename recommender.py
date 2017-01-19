@@ -1,8 +1,6 @@
-import pandas as pd
-
 from utils import *
-from users import *
-from tqdm import tqdm
+from case_base import CaseBase
+from movies import CandidateInfo
 
 
 logger = initialize_logging('cbr')
@@ -57,283 +55,50 @@ class MovieRecommender(MovieRecommenderInterface):
 
     # TODO: we could integrate the model into sklearn, though this is not a traditional model
 
-    def __init__(self, path, neighbors=10, movies_per_neighbor=15, initial_affinity=0.5,
-                 correlation_weight=0.75, min_movies_candidate=0.33, update_rate=0.1):
+    def __init__(self,
+                 path,
+                 neighbors=10,
+                 movies_per_neighbor=15,
+                 top_movies=10,
+                 initial_affinity=0.5,
+                 correlation_weight=0.75,
+                 min_movies_candidate=0.33,
+                 update_rate=0.1,
+                 alpha=0.25,
+                 beta = 0.15,
+                 gamma = 0.20,
+                 theta = 0.1):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
             neighbors: Number of neighbors to retrieve in the CBR cycle.
             movies_per_neighbor: Number of movies per neighbor to extract
+            top_movies: Top rated movies to use for searching candidates.
             initial_affinity: Initial affinity for users.
             correlation_weight: Weight in interval [0, 1] for the rating correlation
                 in user similarity computation.
             min_movies_candidate: Ratio of the mean ratings per user that two users need two share
                 at least to be considered neighbors. By default one third of the movies must be shared.
             update_rate: Pace at which we update the affinity of the users and the genre in recommendations.
+            alpha: Weight for the user correlation in the movie score.
+            beta: Weight for the popularity (mean rating in the system) in the movie score.
+            gamma: Weight for the correlation of user preferences in the movie score.
+            theta: Weight for the willigness of user preferences in the movie score.
         """
-        self._read_data(path)
-        self.inverted_movies = None
+        self.cb = CaseBase(path,
+                           top_movies=top_movies,
+                           initial_affinity = initial_affinity,
+                           correlation_weight = correlation_weight,
+                           min_movies_candidate = min_movies_candidate,
+                           update_rate = update_rate,
+                           alpha = alpha,
+                           beta = beta,
+                           gamma = gamma,
+                           theta = theta)
+        self.cb.initialize()
+
         self.neighbors = neighbors
         self.movies_per_neighbors = movies_per_neighbor
-        self.correlation_weight = correlation_weight
-        self.user_affinity = AffinityCaseBase(initial_preference=initial_affinity,
-                                              modifier=update_rate) # User recommendation feedback
-        self.genre_willigness = AffinityCaseBase(initial_preference=initial_affinity,
-                                                 modifier=update_rate) # Recommendations feedback
-        self.inverted_file = {} # Store movie - user who rated it
-        self.train_indexes = {} # Stores training movie identifiers for each user
-        self.test_indexes = {} # Stores the movie identifiers for each user
-
-        check_ratio('Initial affinity', initial_affinity)
-        check_ratio('Correlation weight', correlation_weight)
-        check_ratio('Uodate rate', update_rate)
-        check_ratio('Ratings ratio', min_movies_candidate)
-
-        self.min_movies_candidate = min_movies_candidate * (self.ratings.shape[0] / self.users.shape[0])
-        logger.info(self.min_movies_candidate)
-
-
-    def _read_data(self, path):
-        """ Reads Movielens 1M data into the class """
-
-        # TODO: do not know if we have to keep this objects forever or whether creating them
-        # are memory intensive. We'll fix this later
-        # TODO: also need to check whether we have to close it
-
-        self.ratings = pd.read_csv(os.path.join(path, 'ratings.dat'),
-                                   sep="::",
-                                   names=['user_id', 'movie_id', 'rating', 'timestamp'],
-                                   engine='python')
-        # Each user has at least 20 ratings. No missing data
-        self.users = pd.read_csv(os.path.join(path, 'users.dat'),
-                                 sep="::",
-                                 names=['user_id', 'sex', 'age_group', 'occupation', 'zip_code'],
-                                 engine='python')
-
-        self.movies = pd.read_csv(os.path.join(path, 'movies.dat'),
-                                  sep="::",
-                                  names=['movie_id', 'name', 'genre'],
-                                  engine='python')
-        # Read possible genres
-        self.genres = self._get_genres()
-        # Build dummy column for each genre
-        self._genres_to_dummy()
-
-
-    def _genres_to_dummy(self):
-        """ Converts movie genres into dummy columns (binary columns) """
-
-        def build_column(data, name):
-            """ Builds the input column taking into account the genes list """
-            return data['genre'].apply(lambda l: name in l)
-
-        # Create column for each genre
-        for g in self.genres:
-            self.movies[g] = build_column(self.movies, g)
-        # Delete original one
-        self.movies = self.movies.drop('genre', 1)
-
-
-    @staticmethod
-    def separate_genre(x):
-        return x.split('|')
-
-    # Retain utilities
-
-    def _get_genres(self):
-        """ Returns unique genres in the system """
-        separated = self.movies['genre'].apply(self.separate_genre)
-        return {g: True for x in separated for g in x}.keys()
-
-
-    def _get_users_list(self):
-        """ Returns the list of user identifiers """
-        return self.users['user_id'].tolist()
-
-
-    def initialize(self, train_ratio=0.8):
-        """ Initialize case base and fills inverted file index
-        Complexity:
-            O(u), where u = number of users,
-            Considering that ratings_user << number of users
-        """
-        logger.info("Initializing CBR case base ...")
-
-        # Iterate over all users
-        users = self._get_users_list()
-        for u_id in tqdm(users, desc="Initializing user information"):
-
-            # Split between training and test movies
-            movies = self._get_user_movies(u_id)
-            train_ind, test_inds = split_data(len(movies), train_ratio)
-            self.train_indexes[u_id] = movies[train_ind]
-            self.test_indexes[u_id] = movies[test_inds]
-
-            # Fill inverted file index with user movies
-            movies = self._get_user_movies(u_id, list=True)
-            for m_id in movies:
-                self.add_user_rating(u_id, m_id)
-
-
-    def add_user_rating(self, user_id, movie_id):
-        """ Adds a user rating to the inverted file indexed structure """
-        if not movie_id in self.inverted_file:
-            self.inverted_file[movie_id] = []
-        self.inverted_file[movie_id].append(user_id)
-
-
-    def _find_users_by_movies(self, movie_id):
-        """ Returns the user identifiers related to users who saw the input movie """
-        return self.inverted_file[movie_id]
-
-
-    def _get_user_preferences(self, user_id, input_movies):
-        """ Sets the user genre preferences for the input set of movies of the user
-        Args:
-            user_id: Identifier of the user
-            movies: Identifier of the movies
-        """
-        # User training ratings
-        user_ratings = self.ratings[(self.ratings['user_id'] == user_id)
-                               & (self.ratings['movie_id'].isin(input_movies))]
-
-        # Get rating-movie information
-        movies_user = pd.merge(user_ratings, self.movies, on='movie_id')
-
-        # Get count of genres
-        genres_sum = movies_user[self.genres].sum()
-        genres_sum_mat = genres_sum.as_matrix()
-
-        # Weight by average of genre within user
-        mean_ratings = np.zeros(len(self.genres))
-        for i, g in enumerate(genres_sum.index):
-            mean_ratings[i] = movies_user[movies_user[g] == True]['rating'].mean()
-
-        # Multiply and replace nans to 0
-        return np.nan_to_num(genres_sum_mat * mean_ratings, 0)
-
-
-    def _get_user_movies(self, user_id, list=False):
-        """ Returns the movies a user has rated
-        Args:
-            list: Whether to return a Matrix (False) or a list (True) """
-        content = self.ratings[self.ratings['user_id'] == user_id]['movie_id']
-        return content.tolist() if list else content.as_matrix()
-
-
-    def _get_user_ratings(self, user_id):
-        return self.ratings[self.ratings['user_id'] == user_id]
-
-
-    def get_shared_ratings(self, user1_id, user2_id):
-        """ Returns the number of rated movies shared by the two users """
-        return pd.merge(self._get_user_ratings(user1_id),
-                        self._get_user_ratings(user2_id),
-                        on=['movie_id'])
-
-
-    def _get_user_correlation(self, user1_id, user2_id):
-        """ Returns the balance of differences between ratings of rated films by both user.
-        Takes only into account those films rated by both """
-        shared_ratings = self.get_shared_ratings(user1_id, user2_id)
-        return (shared_ratings['rating_x'] - shared_ratings['rating_y']).abs().mean()
-
-
-    def _get_user_similarity(self, user1_id, user2_id):
-        """ Returns the similarity between two users """
-        jacc = jaccard_similarity(self._get_user_movies(user1_id),
-                                  self._get_user_movies(user2_id))
-        corr = self._get_user_correlation(user1_id, user2_id)
-        corr_w, jacc_w = self.correlation_weight, 1 - self.correlation_weight
-        return corr * corr_w + jacc * jacc_w
-
-
-    def _get_user_candidates(self, user_id):
-        """ Returns the set of possible candidates for neighbors of input user """
-        neighs = {}
-        for m_id in self._get_user_movies(user_id, list=True):
-            users = self._find_users_by_movies(m_id)
-            for u_id in users:
-                if not u_id in neighs:
-                    neighs[u_id] = 0
-                neighs[u_id] += 1
-        return neighs
-
-
-    # Reuse utilities
-
-    # Tested
-    def _get_filtered_movies(self, user_id, neighbor_id):
-        """ Returns the movies of given neighbor that user_id did not watch """
-        # Get user's and neighbor's movies
-        neighbor_movies = self._get_user_movies(neighbor_id, list='True')
-        movies_watched = self._get_user_movies(user_id, list='True')
-
-        candidates = []
-        # Iterate over movies neighbors rated
-        for neighbor_movie in neighbor_movies:
-            # If user_id did not watch this movie add to candidate list, works like a charm
-            if neighbor_movie not in movies_watched:
-                candidates.append(neighbor_movie)
-        return candidates
-
-    # Tested
-    def _get_user_movie_rating(self, user_id, movie_id):
-        """ Returns rating of given user_id for movie_id """
-        ratings = self.ratings[self.ratings['user_id'] == user_id]
-        return ratings[ratings['movie_id'] == movie_id]['rating'].item()
-
-    # Not tested
-    def _get_overall_popularity(self, movie_id):
-        # TODO:
-        pass
-
-    # Not tested
-    def __get_correlation_movie_genre_user(self, user_id, movie_id):
-        # TODO:
-        pass
-
-    # Not tested
-    def __get_willingness_user_movie(self, user_id, movie_id):
-        # TODO:
-        pass
-
-    # Not tested
-    def _get_complex_score(self, movie_id, user_id, neighbor_id, correlations_neighbor_user):
-        """ Returns the score for given movie taking into account user and given neighbor """
-        # Fixed weights
-        alpha = 0.25
-        beta  = 0.15
-        gamma = 0.20
-        theta = 0.1
-
-        score = (alpha * correlations_neighbor_user * self._get_user_movie_rating(neighbor_id, movie_id)) #+ (beta * get_overall_popularity(movie_id)) +
-                #(gamma * _get_correlation_movie_genre_user(user_id, movie_id)) + (theta * _get_willingness_user_movie(user_id, movie_id))
-        return score
-
-
-    # Not tested
-    def _get_top_ranked_movies(self, user_id, recommended_movies, correlations_neighbor_user, N):
-        """ Returns the top N movies that have highest score to the score_measure(movie,user,neighbor) """
-        # Dictionary contating movies as key and score as value
-        scores = {}
-
-        # Iterate over keys [neighbors] and values [list of movies]
-        for neighbor_id, movies in recommended_movies.iteritems():
-
-            # Iterate over movies of particular neighbor
-            for movie_id in movies:
-                 # Calculate score of movie
-                 scores[movie_id] = self._get_complex_score(movie_id, user_id, neighbor_id, correlations_neighbor_user[neighbor_id])
-
-
-                 # print "Exiting out."
-                 # exit(-1)
-
-        # sort movie_score dict ascending get N best
-        # for loop over them create CandidateInfo object and return list of N Candidates
-        # return 5 movies CandidateInfo
-        return None
 
 
     # Example of CBR cycle
@@ -352,16 +117,12 @@ class MovieRecommender(MovieRecommenderInterface):
         logger.info("Retrieving phase for user %d" % user_id)
 
         # User candidates as those who has rated at least one movie in common with query
-        candidates = self._get_user_candidates(user_id)
-
-        logger.info("Thresholding candidates (%d)" % len(candidates))
-        print(self.min_movies_candidate)
-        candidates = [k for (k, v) in candidates.iteritems() if v > self.min_movies_candidate]
+        candidates = self.cb.get_user_candidates(user_id)
 
         logger.info("Obtaining user similarities (%d)" % len(candidates))
 
         # Get shared movies and correlation for candidates
-        stats = [(c_id, self._get_user_similarity(user_id, c_id)) for c_id in candidates]
+        stats = [(c_id, self.cb.get_user_similarity(user_id, c_id)) for c_id in candidates]
 
         logger.info("Sorting user similarities")
 
@@ -370,28 +131,26 @@ class MovieRecommender(MovieRecommenderInterface):
         return sorted_stats[:neighbors]
 
 
+    # TODO: cache correlation in some way <- we could cache data for each request
+
     def reuse(self, user_id, neighbors, N):
         """ See base class """
 
         logger.info("Reuse phase for user %d" % user_id)
 
-        # Dictionary containing neighbor as key and movies user did not watch from given neighbor as value [movies ids are in list]
-        recommended_movies = {}
+        movies = []
 
-        # Dictionary containing neigbor as key and correlation to the user_id as value
-        correlations_neighbor_user = {}
-
-        # Iterate over retrieved neigbors
+        # Iterate over retrieved neighbors to generate movie candidates
         for neighbor_id in neighbors:
 
-            recommended_movies[neighbor_id] = self._get_filtered_movies(user_id, neighbor_id)
-            correlations_neighbor_user[neighbor_id] = self._get_user_correlation(user_id, neighbor_id)
+            # Create a candidate for all unseen movies
+            unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, N)
+            for m_id in unseen_movies:
+                score = self.cb.get_movie_score(movie_id=m_id, user_id=user_id, neigh_id=neighbor_id)
+                movies.append(CandidateInfo(m_id, neighbor_id, score))
 
-        # Get top ranked movies to recommend to user
-        candidates = self._get_top_ranked_movies(user_id, recommended_movies, correlations_neighbor_user, N)
-
-        # return candidates
-        pass
+        # Return N top movies
+        return sorted(movies, key=lambda x: x.score, reverse=True)[:N]
 
 
     def review(self, user_id, ranked, movie_id, rating):

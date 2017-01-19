@@ -6,10 +6,11 @@ class CandidateInfo(object):
 
     """ Represents a candidate movie recommended from a certain user in the neighborhood """
 
-    def __init__(self, movie_id, user_id):
+    def __init__(self, movie_id, user_id, score):
         """ Constructs a movie candidate from the ids of the user and the movie """
         self.movie = movie_id
         self.user = user_id
+        self.score = score
 
 
 class FeedbackInfo(CandidateInfo):

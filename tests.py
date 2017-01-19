@@ -12,8 +12,8 @@ test_N = 10
 
 # Create and initialize recommender
 train_ratio = 0.8
-rec = MovieRecommender(path=MOVIELENS1M_DATA_FOLDER)
-rec.initialize(train_ratio=train_ratio)
+rec = MovieRecommender(path=MOVIELENS1M_DATA_FOLDER,
+                       top_movies=6)
 
 # Retriving similar users
 similar_users = rec.retrieve(test_user)
@@ -25,7 +25,7 @@ print "Result of the retrieve:"
 print neightbor_ids
 
 # Getting recommendation movies
-#recommended_movies_after_reuse = rec.reuse(test_user, neightbor_ids, test_N)
+recommended_movies_after_reuse = rec.reuse(test_user, neightbor_ids, test_N)
 
 
 #    """ CBR cycle step for the given user for the given movie and rating """
