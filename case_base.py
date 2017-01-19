@@ -340,9 +340,14 @@ class CaseBase(object):
         return rating - user_mean
 
 
-    def _get_genre_vector(self, movie_id):
-        """ Returns the genres of the input movie """
-        return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
+    def _get_genre_vector(self, movie_id, list=False):
+        """ Returns the genres of the input movie
+        Args:
+            list: Whether to return a Matrix (False) or a list (True) """
+        if list:
+            return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].tolist()
+        else:
+            return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
 
 
     def _get_willingness_vector(self, user_id):
@@ -364,6 +369,18 @@ class CaseBase(object):
         u_i = set(self.inverted_file[mi])
         u_j = set(self.inverted_file[mj])
         return float(len(u_i.intersection(u_j))) / float(len(u_i.union(u_j)))
+
+
+    def _update_genre_willigness(self, user_id, candidate_with_feedback):
+        """ Function updates genre_willigness with given feedback
+        Args:
+            candidate_with_feedback: CandidateInfo object containg information about the movie candidate with given feedback """
+        genres = self._get_genre_vector(candidate_with_feedback.movie, list=True)
+        genre_indices = [i for i, x in enumerate(genres) if x]
+        # Update only genres of candidate_with_feedback movie
+        for index, genre in enumerate(self.genres):
+            if index in genre_indices:
+                self.genre_willigness.update_preference(user_id, genre, candidate_with_feedback.feedback)
 
 
     """ Similarity functions """

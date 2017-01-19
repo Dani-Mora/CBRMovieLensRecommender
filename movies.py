@@ -22,6 +22,8 @@ class CandidateInfo(object):
         self.genres = genres
         self.feedback = feedback
 
+    def __repr__(self):
+        return ("Candidate movie ID : " + str(self.movie))
 
 class RatingInfo(object):
 

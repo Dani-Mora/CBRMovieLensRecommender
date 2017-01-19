@@ -1,5 +1,6 @@
 
 import numpy as np
+from movies import FeedbackType
 
 """ File for including user(customer)-related code """
 
@@ -9,8 +10,8 @@ class AffinityCaseBase:
     """ Case base including the recommendation preference between system elements.
 
     Examples:
-        user preference against another
-        user preference against a movie genre
+        CaseBase.user_affinity    = user preference against another
+        CaseBase.genre_willigness = user preference against a movie genre
 
     Preference is a real value in [-1, 1] where -1 means that there is no affinity
     , 0 means neutrality and 1 means highets affinity
@@ -59,8 +60,19 @@ class AffinityCaseBase:
         Args:
             user1: First element of the preference relation
             user2: Second element of the preference relation
-            feedback: Numerical feedback of the affinity. Positive feedback are good
+            feedback: Enumerateed feedback of the affinity. Positive feedback are good
                 while feedback below 0 represents a bad affinity update """
-        self.__check_affinity(elem1, elem2)
-        self.preference[elem1][elem2] += (feedback * self.preference)
+
+        feedback_value = 0
+        if feedback == FeedbackType.VERY_GOOD:
+                feedback_value = 1.25
+        elif feedback == FeedbackType.GOOD:
+                feedback_value = 1
+        elif feedback == FeedbackType.BAD:
+                feedback_value = -1
+        elif feedback == FeedbackType.NEUTRAL:
+                feedback_value = 0
+
+        self._check_affinity(elem1, elem2)
+        self.preference[elem1][elem2] += (feedback_value * self.rate)
         self._check_value(elem1, elem2)

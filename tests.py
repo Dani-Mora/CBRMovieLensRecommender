@@ -3,7 +3,7 @@ from recommender import MovieRecommender
 from utils import MOVIELENS1M_DATA_FOLDER, check_download_data
 
 # Download MovieLens data
-check_download_data()
+#check_download_data()
 
 
 #  Testing data

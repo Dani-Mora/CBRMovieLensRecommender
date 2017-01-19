@@ -45,12 +45,11 @@ class MovieRecommenderInterface(object):
         """
 
 
-    def retain(self, user_id, feedback):
+    def retain(self, rated_case, feedback_list):
         """ CBR retain cycle that retains the evaluation cases into the case base
         Args:
-           user_id: Identifier of the query user
-           feedback: Feedback received from the review phase about the recommendations
-        """
+           rated_case: RatingInfo about the reviewed case
+           feedback_list: List of CandidateInfo containing feedback from thr review phase """
 
 
 class MovieRecommender(MovieRecommenderInterface):
@@ -200,6 +199,21 @@ class MovieRecommender(MovieRecommenderInterface):
         return recommended
 
 
-    def retain(self, user_id, feedback):
-        """ See base class """
-        return NotImplementedError("To be implemented")
+    def retain(self, rated_case, feedback_list):
+        """ See base class
+        Args:
+           rated_case: RatingInfo about the reviewed case
+           feedback_list: List of CandidateInfo containing feedback from thr review phase """
+
+        user_id = rated_case.user
+        logger.info("Retaining phase for user %d", user_id)
+
+        for c in feedback_list:
+            # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed
+            self.cb._update_genre_willigness(user_id, c)
+
+            # Adding updating of the user_affinity
+
+
+        # Adding rated case into inverted file structur
+        # Updating means of CaseBase
