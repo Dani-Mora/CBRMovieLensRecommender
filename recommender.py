@@ -102,15 +102,18 @@ class MovieRecommender(MovieRecommenderInterface):
 
         self.ratings = pd.read_csv(os.path.join(path, 'ratings.dat'),
                                    sep="::",
-                                   names=['user_id', 'movie_id', 'rating', 'timestamp'])
+                                   names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                                   engine='python')
         # Each user has at least 20 ratings. No missing data
         self.users = pd.read_csv(os.path.join(path, 'users.dat'),
                                  sep="::",
-                                 names=['user_id', 'sex', 'age_group', 'occupation', 'zip_code'])
+                                 names=['user_id', 'sex', 'age_group', 'occupation', 'zip_code'],
+                                 engine='python')
 
         self.movies = pd.read_csv(os.path.join(path, 'movies.dat'),
                                   sep="::",
-                                  names=['movie_id', 'name', 'genre'])
+                                  names=['movie_id', 'name', 'genre'],
+                                  engine='python')
         # Read possible genres
         self.genres = self._get_genres()
         # Build dummy column for each genre
@@ -135,6 +138,7 @@ class MovieRecommender(MovieRecommenderInterface):
     def separate_genre(x):
         return x.split('|')
 
+    # Retain utilities
 
     def _get_genres(self):
         """ Returns unique genres in the system """
@@ -256,6 +260,83 @@ class MovieRecommender(MovieRecommenderInterface):
         return neighs
 
 
+    # Reuse utilities
+
+    # Tested
+    def _get_filtered_movies(self, user_id, neighbor_id):
+        """ Returns the movies of given neighbor that user_id did not watch """
+        # Get user's and neighbor's movies
+        neighbor_movies = self._get_user_movies(neighbor_id, list='True')
+        movies_watched = self._get_user_movies(user_id, list='True')
+
+        candidates = []
+        # Iterate over movies neighbors rated
+        for neighbor_movie in neighbor_movies:
+            # If user_id did not watch this movie add to candidate list, works like a charm
+            if neighbor_movie not in movies_watched:
+                candidates.append(neighbor_movie)
+        return candidates
+
+    # Tested
+    def _get_user_movie_rating(self, user_id, movie_id):
+        """ Returns rating of given user_id for movie_id """
+        ratings = self.ratings[self.ratings['user_id'] == user_id]
+        return ratings[ratings['movie_id'] == movie_id]['rating'].item()
+
+    # Not tested
+    def _get_overall_popularity(self, movie_id):
+        # TODO:
+        pass
+
+    # Not tested
+    def __get_correlation_movie_genre_user(self, user_id, movie_id):
+        # TODO:
+        pass
+
+    # Not tested
+    def __get_willingness_user_movie(self, user_id, movie_id):
+        # TODO:
+        pass
+
+    # Not tested
+    def _get_complex_score(self, movie_id, user_id, neighbor_id, correlations_neighbor_user):
+        """ Returns the score for given movie taking into account user and given neighbor """
+        # Fixed weights
+        alpha = 0.25
+        beta  = 0.15
+        gamma = 0.20
+        theta = 0.1
+
+        score = (alpha * correlations_neighbor_user * self._get_user_movie_rating(neighbor_id, movie_id)) #+ (beta * get_overall_popularity(movie_id)) +
+                #(gamma * _get_correlation_movie_genre_user(user_id, movie_id)) + (theta * _get_willingness_user_movie(user_id, movie_id))
+        return score
+
+
+    # Not tested
+    def _get_top_ranked_movies(self, user_id, recommended_movies, correlations_neighbor_user, N):
+        """ Returns the top N movies that have highest score to the score_measure(movie,user,neighbor) """
+        # Dictionary contating movies as key and score as value
+        scores = {}
+
+        # Iterate over keys [neighbors] and values [list of movies]
+        for neighbor_id, movies in recommended_movies.iteritems():
+
+            # Iterate over movies of particular neighbor
+            for movie_id in movies:
+                 # Calculate score of movie
+                 scores[movie_id] = self._get_complex_score(movie_id, user_id, neighbor_id, correlations_neighbor_user[neighbor_id])
+
+
+                 # print "Exiting out."
+                 # exit(-1)
+
+        # sort movie_score dict ascending get N best
+        # for loop over them create CandidateInfo object and return list of N Candidates
+        # return 5 movies CandidateInfo
+        return None
+
+
+    # Example of CBR cycle
     def _process_example(self, user_id, movie_id, rating):
         """ CBR cycle step for the given user for the given movie and rating """
         sim_users = self.retrieve(user_id, neighbors=self.neighbors) # Retrieves a set of user ids
@@ -264,6 +345,7 @@ class MovieRecommender(MovieRecommenderInterface):
         self.retain(user_id, feedback)
 
 
+    # Implementations of MovieRecommenderInterface
     def retrieve(self, user_id, neighbors=10):
         """ See base class """
 
@@ -290,7 +372,26 @@ class MovieRecommender(MovieRecommenderInterface):
 
     def reuse(self, user_id, neighbors, N):
         """ See base class """
-        return NotImplementedError("To be implemented")
+
+        logger.info("Reuse phase for user %d" % user_id)
+
+        # Dictionary containing neighbor as key and movies user did not watch from given neighbor as value [movies ids are in list]
+        recommended_movies = {}
+
+        # Dictionary containing neigbor as key and correlation to the user_id as value
+        correlations_neighbor_user = {}
+
+        # Iterate over retrieved neigbors
+        for neighbor_id in neighbors:
+
+            recommended_movies[neighbor_id] = self._get_filtered_movies(user_id, neighbor_id)
+            correlations_neighbor_user[neighbor_id] = self._get_user_correlation(user_id, neighbor_id)
+
+        # Get top ranked movies to recommend to user
+        candidates = self._get_top_ranked_movies(user_id, recommended_movies, correlations_neighbor_user, N)
+
+        # return candidates
+        pass
 
 
     def review(self, user_id, ranked, movie_id, rating):
