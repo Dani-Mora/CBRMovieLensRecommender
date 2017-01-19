@@ -16,7 +16,8 @@ rec = MovieRecommender(path=MOVIELENS1M_DATA_FOLDER,
                        top_movies=6)
 
 # Retriving similar users
-similar_users = rec.retrieve(test_user)
+rec._process_example()
+'''similar_users = rec.retrieve(test_user)
 neightbor_ids = []
 for s_user in similar_users:
     neightbor_ids.append(s_user[0])
@@ -26,6 +27,7 @@ print neightbor_ids
 
 # Getting recommendation movies
 recommended_movies_after_reuse = rec.reuse(test_user, neightbor_ids, test_N)
+print(recommended_movies_after_reuse)'''
 
 
 #    """ CBR cycle step for the given user for the given movie and rating """

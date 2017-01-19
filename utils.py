@@ -87,3 +87,10 @@ def jaccard_similarity(labels1, labels2):
     """ Returns the Jaccard index between two vectors of labels"""
     lab_set1, lab_set2 = set(labels1), set(labels2)
     return len(lab_set1.intersection(lab_set2)) / len(set(lab_set1).union(lab_set2))
+
+
+def pearson_correlation(items1, items2, mean1, mean2):
+    """ Returns the Pearson correlation between the two input elements """
+    num = sum((items1 - mean1) * (items2 - mean2))
+    den = np.sqrt(sum(np.square(items1 - mean1))) * np.sqrt(sum(np.square(items2 - mean2)))
+    return num / den

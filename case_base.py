@@ -3,8 +3,15 @@ from utils import *
 import pandas as pd
 from tqdm import tqdm
 
+from movies import RatingInfo, CandidateInfo
 
 logger = initialize_logging('casebase')
+
+
+class SimilarityType:
+
+    JACCARD = 'jaccard'
+    PEARSON = 'pearson'
 
 
 class CaseBase(object):
@@ -20,7 +27,8 @@ class CaseBase(object):
                  beta=0.15,
                  gamma=0.20,
                  theta=0.1,
-                 train_ratio=0.8):
+                 train_ratio=0.8,
+                 sim_measure=SimilarityType.PEARSON):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
@@ -36,6 +44,7 @@ class CaseBase(object):
             gamma: Weight for the correlation of user preferences in the movie score.
             theta: Weight for the willigness of user preferences in the movie score.
             train_ratio: Fraction of ratings belonging to training.
+            sim_measure: Similarity measure used to compute user similarities.
         """
         self.top_movies = top_movies
         self.correlation_weight = correlation_weight
@@ -65,6 +74,9 @@ class CaseBase(object):
         self.gamma = gamma
         self.theta = theta
 
+        # User similarity caching
+        self.user_cache = {}
+
         # Check ratios are in correct interval to avoid unexpected behaviors
         check_ratio('Initial affinity', initial_affinity)
         check_ratio('Correlation weight', correlation_weight)
@@ -78,6 +90,8 @@ class CaseBase(object):
 
         # Read data
         self._read_data(path)
+
+        self.sim_measure = sim_measure
 
 
     """ Read data from files"""
@@ -110,6 +124,19 @@ class CaseBase(object):
         self.genres = self._get_genres()
         # Build dummy column for each genre
         self._genres_to_dummy()
+
+
+    def next_test_case(self):
+        """ Returns the next available test case. None if tests exhausted """
+        if self.test_ratings.shape[0] > 0:
+            test_case = self.test_ratings.iloc[0]
+            return RatingInfo(movie_id=test_case['movie_id'],
+                                      user_id=test_case['user_id'],
+                                      rating=test_case['rating'],
+                                      genres=self._get_genre_vector(test_case['movie_id']),
+                                      timestamp=test_case['timestamp'])
+        else:
+            return None
 
 
     def _get_genres(self):
@@ -271,20 +298,19 @@ class CaseBase(object):
                         on=['movie_id'])
 
 
-    def _get_top_movies(self, user_id, top, list=False):
-        """ Returns top rated movies for user. Tries to retrieve min(movies_user, top) """
-        movies = self._get_user_ratings(user_id).sort_values(['rating'], ascending=[False])
-        top_movies = movies.head(n=min(movies.shape[0], top))['movie_id']
-        return top_movies.tolist() if list else top_movies.as_matrix()
-
-
     def get_user_candidates(self, user_id):
         """ Returns the set of possible candidates for neighbors of input user as the users
-        that has seen N top movies from the input user """
+        that has seen at least N top movies from the input user """
+        # Get top movies for user
+        movies = self._get_user_ratings(user_id).sort_values(['rating'], ascending=[False])
+        top_movies = movies.head(n=min(movies.shape[0], self.top_movies))['movie_id'].tolist()
+
+        # Get intersection of users that have seen the top movies
         candidates = None
-        for m_id in self._get_top_movies(user_id, top=self.top_movies, list=True):
+        for m_id in top_movies:
             users = self._find_users_by_movies(m_id)
             candidates = set(users) if candidates is None else candidates.intersection(users)
+
         # Remove user from candidates
         return candidates - set([user_id])
 
@@ -294,16 +320,16 @@ class CaseBase(object):
 
     def get_suggestions(self, user_id, neighbor_id, movies_per_neighbor):
         """ Returns top movies not seen by the user """
-        rated_movies = self.ratings[(self.ratings['user_id'] == neighbor_id)
-                                    & (self.ratings['movie_id'].isin(self._get_unseen_movies(user_id, neighbor_id)))]
-        return rated_movies.iloc[:movies_per_neighbor]['movie_id']
-
-
-    def _get_unseen_movies(self, user_id, neighbor_id):
-        """ Returns the movies of given neighbor that user_id did not watch """
+        # Get movies not seen by user
         neighbor_movies = self._get_user_movies(neighbor_id, list=True)
         movies_watched = self._get_user_movies(user_id, list=True)
-        return list(set(neighbor_movies) - set(movies_watched))
+        unseen_movies = list(set(neighbor_movies) - set(movies_watched))
+
+        # Return subset of movies top rated movies not seen by query user
+        rated_movies = self.ratings[(self.ratings['user_id'] == neighbor_id)
+                                    & (self.ratings['movie_id'].isin(unseen_movies))]
+        top_movies = rated_movies.sort_values(['rating'], ascending=[False])
+        return top_movies.iloc[:movies_per_neighbor]['movie_id']
 
 
     def _get_user_movie_rating(self, user_id, movie_id):
@@ -314,11 +340,9 @@ class CaseBase(object):
         return rating - user_mean
 
 
-    def _get_genre_correlation(self, user_id, movie_id):
-        """ Returns the correlation between the movie genres and the user preferences """
-        user_prefs = self._get_user_preferences(user_id)
-        movie_prefs = self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
-        return np.dot(user_prefs, movie_prefs)
+    def _get_genre_vector(self, movie_id):
+        """ Returns the genres of the input movie """
+        return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
 
 
     def _get_willingness_vector(self, user_id):
@@ -329,18 +353,50 @@ class CaseBase(object):
         return will_vec
 
 
-    def _get_willingness(self, user_id, movie_id):
-        """ Returns the willigness of a user against a certain movie given his
-        recommendation willigness preferences """
-        user_will = self._get_willingness_vector(user_id)
-        movie_prefs = self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
-        return np.dot(user_will, movie_prefs)
+    def get_movie_similarity(self, mi, mj):
+        """ Returns the similarity between two movies as:
+
+            movie_sim(m_i, m_j) = |intersect(U_i, U_j)| / |union(U_i, U_j)|
+
+            Where U_i is the set of users that has seen movie m_i
+
+        """
+        u_i = set(self.inverted_file[mi])
+        u_j = set(self.inverted_file[mj])
+        return float(len(u_i.intersection(u_j))) / float(len(u_i.union(u_j)))
 
 
     """ Similarity functions """
 
 
-    def _get_user_correlation(self, user1_id, user2_id):
+    def get_user_similarity(self, user1, user2):
+        """ Checks whether the input user similarity has been cached """
+        if not user1 in self.user_cache or not user2 in self.user_cache:
+            self.user_cache[user1] = {}
+            self.user_cache[user1][user2] = self._compute_user_similarity(user1, user2)
+            return self.user_cache[user1][user2]
+        elif user1 in self.user_cache:
+            if not user2 in self.user_cache[user1]:
+                self.user_cache[user1][user2] = self._compute_user_similarity(user1, user2)
+                return self.user_cache[user1][user2]
+        else:
+            if not user1 in self.user_cache[user2]:
+                self.user_cache[user2][user1] = self._compute_user_similarity(user1, user2)
+            return self.user_cache[user2][user1]
+
+
+    def _compute_user_similarity(self, user1, user2):
+        """ Computes the similarity/correlation between the input users depending on the
+        case based defined similarity measure """
+        if self.sim_measure == SimilarityType.JACCARD:
+            return self._compute_jaccard(user1, user2)
+        elif self.sim_measure == SimilarityType.PEARSON:
+            return self._compute_pearson(user1, user2)
+        else:
+            raise ValueError("Invalid similarity type: %d" % self.sim_measure)
+
+
+    def _get_correlation(self, user1_id, user2_id):
         """ Returns the balance of differences between ratings of rated films by both user.
         Takes only into account those films rated by both """
         shared_ratings = self.get_shared_ratings(user1_id, user2_id)
@@ -354,7 +410,7 @@ class CaseBase(object):
         return 1.0/disparity
 
 
-    def get_user_similarity(self, user1_id, user2_id):
+    def _compute_jaccard(self, user1_id, user2_id):
         """ Returns the similarity between two users, as:
 
             user_similarity(u1, u2) = w_1 * jaccard(u1, u2) + w_2 * correlation(u1, u2)
@@ -367,31 +423,60 @@ class CaseBase(object):
          """
         jacc = jaccard_similarity(self._get_user_movies(user1_id),
                                   self._get_user_movies(user2_id))
-        corr = self._get_user_correlation(user1_id, user2_id)
+        corr = self._get_correlation(user1_id, user2_id)
         corr_w, jacc_w = self.correlation_weight, 1 - self.correlation_weight
         return corr * corr_w + jacc * jacc_w
 
 
-    def get_movie_score(self, movie_id, user_id, neigh_id):
-        """ Returns the score for given movie taking into account user and given neighbor, as:
+    def _compute_pearson(self, user1_id, user2_id):
+        """ Returns the Pearson correlation between the two users """
+        shared_movies = self.get_shared_ratings(user1_id, user2_id)
+        ratings1, ratings2 = shared_movies['rating_x'].as_matrix(), shared_movies['rating_y'].as_matrix()
+        mean_user1, mean_user2 = self.get_mean_user_rating(user1_id), self.get_mean_user_rating(user2_id)
+        return pearson_correlation(ratings1, ratings2, mean_user1, mean_user2)
 
-            Score(m, u1, u2) = \alpha * correlation(u1, u2) * rating(u2, m)
-                                + \beta * mean_rating(m)
-                                + \gamma * genre(u1, m)
-                                + \theta * willingness(u1, m)
+
+    def get_movie_candidate(self, movie_id, user_id, neigh_id):
+        """ Returns the candidate information for the given movie, given that is recommended to
+        a specific user and coming from another one
+
+        Computes a score for the movie, based on:
+
+            Score(m, u1, u2) = \alpha * similarity(u1, u2) * rating(u2, m)
+                        + \beta * mean_rating(m)
+                        + \gamma * genre(u1, m)
+                        + \theta * willingness(u1, m)
 
             Where:
-                - 'correlation(u1,u2)' is the inverse of the disparity of scores in
+
+                - 'similarity(u1,u2)' is the inverse of the disparity of scores in
                     rated movies between users u1 and u2
+
                 - 'mean_rating(m) is the mean rating of movie m in the system
+
                 - 'genre(u1,m)' is the dot product between the user u1 preferences and the movie genres from m
+
                 - willigness(u1, m) is the dot product between the genre wwillingness of u1 and
                     the movie genres from m
 
-            Alpha, Beta, Gamma and Theta are preset constants.
+        Args:
+            movie_id: Movie identifier
+            user_id: User recommendation is made to
+            neigh_id: User recommendation comes from
+        Returns:
+            candidate: CandidateInfo class
         """
+        movie_genres = self._get_genre_vector(movie_id)
 
-        return self.alpha * self._get_user_correlation(user_id, neigh_id) * self._get_user_movie_rating(neigh_id, movie_id) + \
-               self.beta * self.get_mean_movie_rating(movie_id) + \
-               self.gamma * self._get_genre_correlation(user_id, movie_id) + \
-               self.theta * self._get_willingness(user_id, movie_id)
+        # Compute score
+        user_term = self.alpha * self.get_user_similarity(user_id, neigh_id) \
+                    * self._get_user_movie_rating(neigh_id, movie_id)
+        rating_term = self.beta * self.get_mean_movie_rating(movie_id)
+        genre_term = self.gamma * np.dot(self._get_user_preferences(user_id), movie_genres)
+        will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
+        score = user_term + rating_term + genre_term + will_term
+
+        return CandidateInfo(movie_id=movie_id,
+                             user_id=user_id,
+                             score=score,
+                             genres=movie_genres)
