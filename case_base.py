@@ -74,6 +74,10 @@ class CaseBase(object):
         self.gamma = gamma
         self.theta = theta
 
+        # User's neighbor caching for user affinity
+        # Key is user ID, value is list of neighbor IDs
+        self.user_neighbors = {}
+
         # User similarity caching
         self.user_cache = {}
 
@@ -314,6 +318,29 @@ class CaseBase(object):
         # Remove user from candidates
         return candidates - set([user_id])
 
+    def save_user_neighbors(self, user_id, neighbors):
+        """ Method saves the users from reuse phase to the case base with key user_id """
+        self.user_neighbors[user_id] = neighbors
+
+
+    def _get_user_affinity(self, user_id):
+        """ Returns the user_affinity vector to his neighbors for the given user """
+        neighbors = self.user_neighbors[user_id]
+        aff_vec = np.zeros(len(neighbors))
+        for index, neighbor in enumerate(neighbors):
+            aff_vec[index] = self.user_affinity.get_affinity(user_id, neighbor)
+        return aff_vec
+
+
+    def update_user_affinity(self, user_id, candidate_with_feedback):
+        """ Function updates user_affinity with given feedback
+        Args:
+            candidate_with_feedback: CandidateInfo object containg information about the movie candidate with given feedback """
+        # Update only user's neighbor that is Candidate with feedback
+        for index, neighbor in enumerate(self.user_neighbors[user_id]):
+            if neighbor == candidate_with_feedback.neighbor_id_rated:
+                self.user_affinity.update_preference(user_id, neighbor, candidate_with_feedback.feedback)
+
 
     """ Movie-related functions """
 
@@ -350,14 +377,6 @@ class CaseBase(object):
             return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
 
 
-    def _get_willingness_vector(self, user_id):
-        """ Returns the willigness vector for the given user """
-        will_vec = np.zeros(len(self.genres))
-        for i, g in enumerate(self.genres):
-            will_vec[i] = self.genre_willigness.get_affinity(user_id, g)
-        return will_vec
-
-
     def get_movie_similarity(self, mi, mj):
         """ Returns the similarity between two movies as:
 
@@ -370,8 +389,15 @@ class CaseBase(object):
         u_j = set(self.inverted_file[mj])
         return float(len(u_i.intersection(u_j))) / float(len(u_i.union(u_j)))
 
+    def _get_willingness_vector(self, user_id):
+        """ Returns the willigness vector for the given user """
+        will_vec = np.zeros(len(self.genres))
+        for i, g in enumerate(self.genres):
+            will_vec[i] = self.genre_willigness.get_affinity(user_id, g)
+        return will_vec
 
-    def _update_genre_willigness(self, user_id, candidate_with_feedback):
+
+    def update_genre_willigness(self, user_id, candidate_with_feedback):
         """ Function updates genre_willigness with given feedback
         Args:
             candidate_with_feedback: CandidateInfo object containg information about the movie candidate with given feedback """
@@ -493,7 +519,13 @@ class CaseBase(object):
         will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
         score = user_term + rating_term + genre_term + will_term
 
+        # User-affinty value
+        # At the moment not in the use
+        aff_vec = self._get_user_affinity(user_id)
+
+
         return CandidateInfo(movie_id=movie_id,
                              user_id=user_id,
+                             neighbor_id_rated=neigh_id,
                              score=score,
                              genres=movie_genres)

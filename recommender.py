@@ -142,6 +142,10 @@ class MovieRecommender(MovieRecommenderInterface):
     def reuse(self, user_id, neighbors, N):
         """ See base class """
 
+        # Save user's neighbors in CaseBase for user_affinity
+        neighbor_id_list = [(n[0]) for n in neighbors]
+        self.cb.save_user_neighbors(user_id, neighbor_id_list)
+
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
@@ -165,6 +169,9 @@ class MovieRecommender(MovieRecommenderInterface):
         # Fill feedback of recommendations
         for rec in recommended:
 
+
+            print "Candidate Info ", rec.user
+            print "Movie ",
             # Debug
             sim = self.cb.get_movie_similarity(rec.movie, rated.movie)
             rat = self.cb.get_mean_user_rating(rec.user)
@@ -210,10 +217,11 @@ class MovieRecommender(MovieRecommenderInterface):
 
         for c in feedback_list:
             # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed
-            self.cb._update_genre_willigness(user_id, c)
-
-            # Adding updating of the user_affinity
+            self.cb.update_genre_willigness(user_id, c)
+            # Updating user affinity of user_id
+            self.cb.update_user_affinity(user_id, c)
 
 
         # Adding rated case into inverted file structur
         # Updating means of CaseBase
+        return
