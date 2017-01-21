@@ -1,8 +1,9 @@
+from __future__ import division
 from users import *
 from utils import *
 import pandas as pd
 from tqdm import tqdm
-
+from scipy import stats
 from movies import RatingInfo, CandidateInfo
 
 logger = initialize_logging('casebase')
@@ -23,10 +24,10 @@ class CaseBase(object):
                  correlation_weight=0.75,
                  min_movies_candidate=0.33,
                  update_rate=0.1,
-                 alpha=0.25,
-                 beta=0.15,
-                 gamma=0.20,
-                 theta=0.1,
+                 alpha=0.20,
+                 beta=0.10,
+                 gamma=0.25,
+                 theta=0.25,
                  train_ratio=0.8,
                  sim_measure=SimilarityType.PEARSON):
         """ Constructor of the class
@@ -73,6 +74,9 @@ class CaseBase(object):
         self.beta = beta
         self.gamma = gamma
         self.theta = theta
+
+        # Counter for test_rating set
+        self.count = 0
 
         # User's neighbor caching for user affinity
         # Key is user ID, value is list of neighbor IDs
@@ -133,7 +137,8 @@ class CaseBase(object):
     def next_test_case(self):
         """ Returns the next available test case. None if tests exhausted """
         if self.test_ratings.shape[0] > 0:
-            test_case = self.test_ratings.iloc[0]
+            test_case = self.test_ratings.iloc[self.count]
+            self.count = self.count + 1
             return RatingInfo(movie_id=test_case['movie_id'],
                                       user_id=test_case['user_id'],
                                       rating=test_case['rating'],
@@ -377,17 +382,57 @@ class CaseBase(object):
             return self.movies[self.movies['movie_id'] == movie_id][self.genres].iloc[0].as_matrix()
 
 
-    def get_movie_similarity(self, mi, mj):
+    def get_movie_similarity(self, mi, mi_genres, mj, mj_genres):
         """ Returns the similarity between two movies as:
 
-            movie_sim(m_i, m_j) = |intersect(U_i, U_j)| / |union(U_i, U_j)|
+            movie_sim(m_i, m_j) = (|intersect(U_i, U_j)| / min(|U_i|, |U_j|)) + jaccard_similarity_genres + pearson_ratings_both_movies
 
-            Where U_i is the set of users that has seen movie m_i
-
+            Where
+                U_i is the set of users that has seen movie m_i
+                Jaccard_similarity_genres calculates jaccard similarity between genres of the movies mi and mj
+                Pearson_ratings_both_movies is calculation of the pearson correlation between ratings of movies both users rated
+        Args:
+            mi, mj: Movie_ids of the movies
+            mi_genres, mj_genres: Genres of movies to calculate Jaccard similarity
         """
+        # Find count of users rated by given movie_id
         u_i = set(self.inverted_file[mi])
         u_j = set(self.inverted_file[mj])
-        return float(len(u_i.intersection(u_j))) / float(len(u_i.union(u_j)))
+
+        # Count of users rated both movies
+        rated_both = len(u_i.intersection(u_j))
+        min_rated = min(len(u_i), len(u_j))
+        term_1 = (float(rated_both) / float(min_rated))
+
+        # Fastest numpy array initailization
+        ratings_mi = np.empty(rated_both)
+        ratings_mj = np.empty(rated_both)
+
+        # Fill np arrays with both ratings of the movie1, movie2 for user
+        inter  = u_i.intersection(u_j)
+        for index, user in enumerate(inter):
+            ratings = self._get_user_ratings(user)
+            ratings_mi[index] = ratings[(ratings['user_id'] == user) & (ratings['movie_id'] == mi)]['rating'].iloc[0]
+            ratings_mj[index] = ratings[(ratings['user_id'] == user) & (ratings['movie_id'] == mj)]['rating'].iloc[0]
+
+        # Calculate pearson correlation between ratings of movies both users rated
+        pearson = stats.pearsonr(ratings_mi, ratings_mj)[0]
+
+        # Index genres to use them for Jaccard similarity
+        genre_indices_mi = [i for i, x in enumerate(mi_genres) if x]
+        genre_indices_mj = [i for i, x in enumerate(mj_genres) if x]
+
+        # Calculate jaccard similarity between movie genres
+        genre_jaccard = improved_jaccard_similarity(genre_indices_mi, genre_indices_mj)
+
+        # Score similarity of movie combining term_1 of count rating movie, jaccard similarity between genres and pearson
+        score_similarity = term_1 + float(genre_jaccard) + pearson
+
+        # Normalizing similarity score in range [0-1]
+        min_value = -0.7
+        max_value = 2.7
+        normalized_similarity = float(score_similarity - min_value) / float(max_value - min_value)
+        return normalized_similarity
 
     def _get_willingness_vector(self, user_id):
         """ Returns the willigness vector for the given user """
@@ -517,12 +562,10 @@ class CaseBase(object):
         rating_term = self.beta * self.get_mean_movie_rating(movie_id)
         genre_term = self.gamma * np.dot(self._get_user_preferences(user_id), movie_genres)
         will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
+
+        # user_aff_term = self.theta * np.dot(self._get_user_affinity(user_id), )
+
         score = user_term + rating_term + genre_term + will_term
-
-        # User-affinty value
-        # At the moment not in the use
-        aff_vec = self._get_user_affinity(user_id)
-
 
         return CandidateInfo(movie_id=movie_id,
                              user_id=user_id,

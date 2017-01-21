@@ -1,3 +1,4 @@
+from __future__ import division
 import os
 import zipfile
 import wget
@@ -87,6 +88,15 @@ def jaccard_similarity(labels1, labels2):
     """ Returns the Jaccard index between two vectors of labels"""
     lab_set1, lab_set2 = set(labels1), set(labels2)
     return len(lab_set1.intersection(lab_set2)) / len(set(lab_set1).union(lab_set2))
+
+
+def improved_jaccard_similarity(list_1, list_2):
+    """ Returns the Jaccard index between two sets
+    Source: http://love-python.blogspot.com.es/2012/07/python-code-to-compute-jaccard-index.html """
+    set_1 = set(list_1)
+    set_2 = set(list_2)
+    n = len(set_1.intersection(set_2))
+    return n / float(len(set_1) + len(set_2) - n)
 
 
 def pearson_correlation(items1, items2, mean1, mean2):

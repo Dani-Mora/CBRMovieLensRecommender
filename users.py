@@ -17,7 +17,7 @@ class AffinityCaseBase:
     , 0 means neutrality and 1 means highets affinity
     """
 
-    def __init__(self, initial_preference=0, modifier=0.1):
+    def __init__(self, initial_preference=0, modifier=0.05):
         """ Class constructor
         Args:
             initial_preference: Initial affinity measure. In interval [-1, 1]
@@ -64,9 +64,7 @@ class AffinityCaseBase:
                 while feedback below 0 represents a bad affinity update """
 
         feedback_value = 0
-        if feedback == FeedbackType.VERY_GOOD:
-                feedback_value = 1.25
-        elif feedback == FeedbackType.GOOD:
+        if feedback == FeedbackType.GOOD:
                 feedback_value = 1
         elif feedback == FeedbackType.BAD:
                 feedback_value = -1

@@ -1,13 +1,10 @@
 from utils import *
 from case_base import CaseBase, SimilarityType
 from movies import FeedbackType
-
+import pandas as pd
 
 logger = initialize_logging('cbr')
 
-# TODO and future work:
-# We are not using timestamps and actually order here is important. Could be added or commented as future work
-# End process example function
 
 class MovieRecommenderInterface(object):
 
@@ -45,11 +42,12 @@ class MovieRecommenderInterface(object):
         """
 
 
-    def retain(self, rated_case, feedback_list):
-        """ CBR retain cycle that retains the evaluation cases into the case base
+    def retain(self, rated_case, feedback_list, retain_rated_case):
+        """ See base class
         Args:
            rated_case: RatingInfo about the reviewed case
-           feedback_list: List of CandidateInfo containing feedback from thr review phase """
+           feedback_list: List of CandidateInfo containing feedback from thr review phase
+           retain_rated_case: True / False value for saving the case to the CaseBase """
 
 
 class MovieRecommender(MovieRecommenderInterface):
@@ -68,7 +66,7 @@ class MovieRecommender(MovieRecommenderInterface):
                  beta=0.15,
                  gamma=0.20,
                  theta=0.1,
-                 movie_threshold=0.10,
+                 movie_threshold=0.40,
                  sim_measure=SimilarityType.PEARSON):
         """ Constructor of the class
         Args:
@@ -106,16 +104,20 @@ class MovieRecommender(MovieRecommenderInterface):
         self.movies_per_neighbors = movies_per_neighbor
         self.movie_thresh = movie_threshold
 
+        # Variables helper for retain phase
+        self.N = 0
+        self.case_to_add = []
+        self.update_value = 5
+
 
     # Example of CBR cycle
-    def _process_example(self):
+    def _process_next_case(self):
         """ CBR cycle step for the given user for the given movie and rating """
         rated = self.cb.next_test_case()
         sim_users = self.retrieve(rated.user, neighbors=self.neighbors) # Retrieves a set of user ids
         sim_movies = self.reuse(rated.user, neighbors=sim_users, N=self.movies_per_neighbors) # Retrieves a set of MovieInfo
-        feedback = self.review(rated, sim_movies)
-        self.retain(rated, feedback)
-        # TODO: Tell cbr to add incorporate 'rated' into the ratings database
+        feedback, retain_rated_case = self.review(rated, sim_movies)
+        self.retain(rated, feedback, retain_rated_case)
 
 
     """ Implementations of the Recommender interface """
@@ -169,11 +171,8 @@ class MovieRecommender(MovieRecommenderInterface):
         # Fill feedback of recommendations
         for rec in recommended:
 
-
-            print "Candidate Info ", rec.user
-            print "Movie ",
-            # Debug
-            sim = self.cb.get_movie_similarity(rec.movie, rated.movie)
+            # Calculating movie similarity between rated movie and recommended movie
+            sim = self.cb.get_movie_similarity(rec.movie, rec.genres, rated.movie, rated.genres)
             rat = self.cb.get_mean_user_rating(rec.user)
 
             print('Mean rating is %f and similarity is %f' % (rat, sim))
@@ -186,7 +185,7 @@ class MovieRecommender(MovieRecommenderInterface):
                 logger.info("Recommended movie %d was the same - Bad rating" % rec.movie)
                 rec.feedback = FeedbackType.BAD
 
-            elif self.cb.get_movie_similarity(rec.movie, rated.movie) > self.movie_thresh:
+            elif sim > self.movie_thresh:
 
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
                     logger.info("Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie))
@@ -203,25 +202,54 @@ class MovieRecommender(MovieRecommenderInterface):
                     logger.info("Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.NEUTRAL
 
-        return recommended
+        return recommended, True
 
 
-    def retain(self, rated_case, feedback_list):
+    def retain(self, rated_case, feedback_list, retain_rated_case):
         """ See base class
         Args:
            rated_case: RatingInfo about the reviewed case
-           feedback_list: List of CandidateInfo containing feedback from thr review phase """
+           feedback_list: List of CandidateInfo containing feedback from thr review phase
+           retain_rated_case: True / False value for saving the case to the CaseBase
+       """
+
+        if (retain_rated_case):
+            self.N = self.N + 1
+            self.case_to_add.append(rated_case)
+
+            if (self.N == self.update_value):
+                users = []
+                movies = []
+                ratings = []
+                timestamps = []
+                for c in self.case_to_add:
+                    # Add case information to the lists
+                    users.append(c.user)
+                    movies.append(c.movie)
+                    ratings.append(c.rating)
+                    timestamps.append(c.timestamp)
+
+                # Add N cases to the CaseBase and update CaseBase
+                frame = pd.DataFrame({'user_id': users, 'movie_id': movies, 'rating': ratings, 'timestamp': timestamps})
+                self.cb.ratings = pd.concat([self.cb.ratings, frame], ignore_index=True)
+
+                # Reset values and empty rated case list
+                self.N = 0
+                self.case_to_add = []
+
+                # Update CaseBase
+                self.cb.update_popularity()
+                self.cb.update_mean_movie_rating()
+                self.cb.update_mean_user_rating()
+                logger.info("Updating the CaseBase with cases")
 
         user_id = rated_case.user
         logger.info("Retaining phase for user %d", user_id)
 
         for c in feedback_list:
-            # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed
-            self.cb.update_genre_willigness(user_id, c)
-            # Updating user affinity of user_id
-            self.cb.update_user_affinity(user_id, c)
+           # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed
+           self.cb.update_genre_willigness(user_id, c)
+           # Updating user affinity of user_id
+           self.cb.update_user_affinity(user_id, c)
 
-
-        # Adding rated case into inverted file structur
-        # Updating means of CaseBase
         return
