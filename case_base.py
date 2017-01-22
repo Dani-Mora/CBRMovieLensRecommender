@@ -5,6 +5,7 @@ import pandas as pd
 from tqdm import tqdm
 from scipy import stats
 from movies import RatingInfo, CandidateInfo
+from collections import defaultdict
 
 logger = initialize_logging('casebase')
 
@@ -136,6 +137,9 @@ class CaseBase(object):
 
     def next_test_case(self):
         """ Returns the next available test case. None if tests exhausted """
+
+        #self.test_ratings = self.test_ratings.sort(['user_id'], ascending=[True])
+
         if self.test_ratings.shape[0] > 0:
             test_case = self.test_ratings.iloc[self.count]
             self.count = self.count + 1
@@ -182,7 +186,7 @@ class CaseBase(object):
             O(u), where u = number of users,
             Considering that ratings_user << number of users
         """
-        logger.info("Initializing CBR case base ...")
+        print "Initializing CBR case base ..."
 
         # Separate ratings dataframe between train and test
         train, test = split_data(self.all_ratings.shape[0], train_ratio)
@@ -198,11 +202,11 @@ class CaseBase(object):
                 self.add_user_rating(u_id, m_id)
 
         # Compute global structures
-        logger.info("Initializing movie popularity ...")
+        print "Initializing movie popularity ..."
         self.update_popularity()
-        logger.info("Initializing mean movie score ...")
+        print "Initializing mean movie score ..."
         self.update_mean_movie_rating()
-        logger.info("Initializing mean user score ...")
+        print "Initializing mean user score ..."
         self.update_mean_user_rating()
 
 
@@ -310,18 +314,74 @@ class CaseBase(object):
     def get_user_candidates(self, user_id):
         """ Returns the set of possible candidates for neighbors of input user as the users
         that has seen at least N top movies from the input user """
-        # Get top movies for user
+
+        # Parameters for tweaking, should be moved to the consructor of CaseBase
+        self.N = 10
+        self.K = 6
+        self.threshold_minimum_similarity = 1
+        # minimum number of users to be significant to check
+        self.min_K = 3
+        self.max_users_to_use = 20
+
+        # Get top and lowest rated movies for user
         movies = self._get_user_ratings(user_id).sort_values(['rating'], ascending=[False])
-        top_movies = movies.head(n=min(movies.shape[0], self.top_movies))['movie_id'].tolist()
+        top_movies = movies.head(int(self.N/2))['movie_id'].tolist()
+        lowest_rated_movies = movies.tail(int(self.N/2))['movie_id'].tolist()
 
-        # Get intersection of users that have seen the top movies
-        candidates = None
-        for m_id in top_movies:
-            users = self._find_users_by_movies(m_id)
-            candidates = set(users) if candidates is None else candidates.intersection(users)
+        list_films = top_movies + lowest_rated_movies
+        movies_ratings = {}
 
-        # Remove user from candidates
-        return candidates - set([user_id])
+        # Building movie-rating dictionary
+        for movie in list_films:
+            movies_ratings[movie] = self._get_user_movie_rating_raw(user_id, movie)
+
+        list_control_users = defaultdict()
+        set_selected_users = set()
+        set_discarded_users = set()
+        set_ignore_users = set()
+
+        for film_index in range(len(list_films)):
+            if self.max_users_to_use <= len(set_selected_users):
+				break
+            m_id = list_films[film_index]
+            # Select the users who have seen movie 'm_id'
+            list_users_movie = self._find_users_by_movies(m_id)
+            for user in list_users_movie:
+                if user in set_ignore_users:
+                    continue
+                if not user in list_control_users:
+                    list_control_users[user] = 0
+                list_control_users[user] += 1 if abs(movies_ratings[m_id] - self._get_user_movie_rating_raw(user, m_id)) < 1 else 0
+                if list_control_users[user] == self.K/2:
+                    # If the user has seen at least K/2, we exhaustively research it
+                    list_user_ratings = self._get_user_ratings(user).sort_values(['rating'], ascending=[False])
+
+                    # We check all remaining films
+                    for i in range(m_id+1,len(list_films)):
+                        new_m_id = list_films[i]
+                        if new_m_id in list_user_ratings:
+                            list_control_users[user] += 1 if abs(movies_ratings[new_m_id] - self._get_user_movie_rating_raw(user, newm_id  )) < 1 else 0
+                        if list_control_users[user] == self.K:
+                            # If there are K matches, we keep the user
+                            set_selected_users.add(user)
+                            set_ignore_users.add(user)
+                            break
+                    if list_control_users[user] < self.K:
+                        if list_control_users[user] < self.min_K:
+                            set_discarded_users.add(user)
+                        set_ignore_users.add(user)
+                        # If there are not K matches, we discard the user
+
+        # If we have not found enough matches, we already have the number of matches nevertheless.
+        while len(set_selected_users) < self.max_users_to_use:
+            self.K -= 2
+            for user_id, num_matches in list_control_users.items():
+                if user_id in set_selected_users or user in set_discarded_users:
+                    continue
+                if num_matches == self.K:
+                    set_selected_users.add(user_id)
+
+        return set_selected_users
 
     def save_user_neighbors(self, user_id, neighbors):
         """ Method saves the users from reuse phase to the case base with key user_id """
@@ -361,7 +421,7 @@ class CaseBase(object):
         rated_movies = self.ratings[(self.ratings['user_id'] == neighbor_id)
                                     & (self.ratings['movie_id'].isin(unseen_movies))]
         top_movies = rated_movies.sort_values(['rating'], ascending=[False])
-        return top_movies.iloc[:movies_per_neighbor]['movie_id']
+        return top_movies.iloc[:movies_per_neighbor]['movie_id'].tolist()
 
 
     def _get_user_movie_rating(self, user_id, movie_id):
@@ -370,6 +430,11 @@ class CaseBase(object):
                               (self.ratings['movie_id'] == movie_id)]['rating'].iloc[0]
         user_mean = self.get_mean_user_rating(user_id)
         return rating - user_mean
+
+    def _get_user_movie_rating_raw(self, user_id, movie_id):
+        """ Returns rating of given user_id for movie_id, after subtracting the user mean """
+        return self.ratings[(self.ratings['user_id'] == user_id) &
+                              (self.ratings['movie_id'] == movie_id)]['rating'].iloc[0]
 
 
     def _get_genre_vector(self, movie_id, list=False):
@@ -429,8 +494,8 @@ class CaseBase(object):
         score_similarity = term_1 + float(genre_jaccard) + pearson
 
         # Normalizing similarity score in range [0-1]
-        min_value = -0.7
-        max_value = 2.7
+        min_value = -0.75
+        max_value = 2.75
         normalized_similarity = float(score_similarity - min_value) / float(max_value - min_value)
         return normalized_similarity
 
@@ -563,9 +628,15 @@ class CaseBase(object):
         genre_term = self.gamma * np.dot(self._get_user_preferences(user_id), movie_genres)
         will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
 
-        # user_aff_term = self.theta * np.dot(self._get_user_affinity(user_id), )
+        """ Suggestion of adding the user_affinity which is updating into this score """
+        #neighbors_mean = []
+        #for n in self.user_neighbors[user_id]:
+        #        neighbors_mean.append(self.get_mean_user_rating(n))
 
-        score = user_term + rating_term + genre_term + will_term
+        #last_term = self.beta * np.dot(self._get_user_affinity(user_id), neighbors_mean)
+
+
+        score = user_term + rating_term + genre_term + will_term # + last_term
 
         return CandidateInfo(movie_id=movie_id,
                              user_id=user_id,

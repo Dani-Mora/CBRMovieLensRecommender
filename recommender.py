@@ -3,9 +3,6 @@ from case_base import CaseBase, SimilarityType
 from movies import FeedbackType
 import pandas as pd
 
-logger = initialize_logging('cbr')
-
-
 class MovieRecommenderInterface(object):
 
     """ Interface for Movie Recommender """
@@ -56,7 +53,7 @@ class MovieRecommender(MovieRecommenderInterface):
     def __init__(self,
                  path,
                  neighbors=10,
-                 movies_per_neighbor=15,
+                 movies_per_neighbor=10,
                  top_movies=10,
                  initial_affinity=0.5,
                  correlation_weight=0.75,
@@ -126,17 +123,17 @@ class MovieRecommender(MovieRecommenderInterface):
     def retrieve(self, user_id, neighbors=10):
         """ See base class """
 
-        logger.info("Retrieving phase for user %d" % user_id)
+        print "Retrieving phase for user %d" % user_id
 
         # User candidates as those who has rated at least one movie in common with query
         candidates = self.cb.get_user_candidates(user_id)
 
         # Get shared movies and correlation for candidates
-        logger.info("Obtaining user similarities (%d)" % len(candidates))
+        print "Obtaining user similarities (%d)" % len(candidates)
         stats = [(c_id, self.cb.get_user_similarity(user_id, c_id)) for c_id in candidates]
 
         # Return top
-        logger.info("Sorting user similarities")
+        print "Sorting user similarities"
         sorted_stats = sorted(stats, key=lambda tup: tup[1], reverse=True)
         return sorted_stats[:neighbors]
 
@@ -148,26 +145,32 @@ class MovieRecommender(MovieRecommenderInterface):
         neighbor_id_list = [(n[0]) for n in neighbors]
         self.cb.save_user_neighbors(user_id, neighbor_id_list)
 
-        logger.info("Reuse phase for user %d" % user_id)
+        print "Reuse phase for user %d" % user_id
         movies = []
 
         # Iterate over retrieved neighbors to generate movie candidates
         for (neighbor_id, _) in neighbors:
-
             # Create a candidate for all unseen movies
             unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, N)
             for m_id in unseen_movies:
                 candidate = self.cb.get_movie_candidate(movie_id=m_id, user_id=user_id, neigh_id=neighbor_id)
                 movies.append(candidate)
 
+        # Unique recommendations
+        dict_candidate = {}
+        for m in movies:
+            dict_candidate[m.movie] = m
+        unique_recommendations = dict_candidate.values()
+
         # Return N top movies
-        return sorted(movies, key=lambda x: x.score, reverse=True)[:N]
+        return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:N]
 
 
     def review(self, rated, recommended):
         """ See base class """
-        logger.info("Reuse phase for user %d" % rated.user)
+        print "Review phase for user %d" % rated.user
 
+        sum_similarity = 0
         # Fill feedback of recommendations
         for rec in recommended:
 
@@ -175,33 +178,38 @@ class MovieRecommender(MovieRecommenderInterface):
             sim = self.cb.get_movie_similarity(rec.movie, rec.genres, rated.movie, rated.genres)
             rat = self.cb.get_mean_user_rating(rec.user)
 
+            sum_similarity = sum_similarity + sim
             print('Mean rating is %f and similarity is %f' % (rat, sim))
 
             if rec.movie == rated.movie and rated.rating > self.cb.get_mean_user_rating(rec.user):
-                logger.info("Recommended movie %d is the same - Good rating" % rec.movie)
+                print "Recommended movie %d is the same - Good rating" % rec.movie
                 rec.feedback = FeedbackType.GOOD
 
             elif rec.movie == rated.movie and rated.rating <= self.cb.get_mean_user_rating(rec.user):
-                logger.info("Recommended movie %d was the same - Bad rating" % rec.movie)
+                print "Recommended movie %d was the same - Bad rating" % rec.movie
                 rec.feedback = FeedbackType.BAD
 
             elif sim > self.movie_thresh:
 
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    logger.info("Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie))
+                    print "Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie)
                     rec.feedback = FeedbackType.GOOD
                 else:
-                    logger.info("Movie %d is similar to %s - Bad rating" % (rec.movie, rated.movie))
+                    print "Movie %d is similar to %s - Bad rating" % (rec.movie, rated.movie)
                     rec.feedback = FeedbackType.BAD
             else:
                 # Movie is different
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    logger.info("Movie %d is not similar to %s - Good rating" % (rec.movie, rated.movie))
+                    print "Movie %d is not similar to %s - Good rating" % (rec.movie, rated.movie)
                     rec.feedback = FeedbackType.BAD
                 else:
-                    logger.info("Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie))
+                    print "Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie)
                     rec.feedback = FeedbackType.NEUTRAL
 
+        """ Place for adding deciding point for retaining / not retaining case, should use similarities caluclated and mean rating !"""
+        similarity = float (sum_similarity / len(recommended))
+        print "Overall similarity ", similarity
+        # At the moment we retain every case - test of the update class works 
         return recommended, True
 
 
@@ -241,10 +249,10 @@ class MovieRecommender(MovieRecommenderInterface):
                 self.cb.update_popularity()
                 self.cb.update_mean_movie_rating()
                 self.cb.update_mean_user_rating()
-                logger.info("Updating the CaseBase with cases")
+                print "Updating the CaseBase with cases"
 
         user_id = rated_case.user
-        logger.info("Retaining phase for user %d", user_id)
+        print "Retaining phase for user %d" % user_id
 
         for c in feedback_list:
            # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed

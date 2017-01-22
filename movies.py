@@ -23,8 +23,8 @@ class CandidateInfo(object):
         self.feedback = feedback
 
     def __repr__(self):
-        return ("Movie candidate ID: " + str(self.movie) + "\n"
-                "Movie genres: " + str(self.genres))
+        return ("Movie candidate ID: " + str(self.movie))
+        # TODO: Make representation of real genres list 
 
 class RatingInfo(object):
 
