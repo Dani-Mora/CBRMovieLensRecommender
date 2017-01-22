@@ -111,8 +111,14 @@ class MovieRecommender(MovieRecommenderInterface):
     def _process_next_case(self):
         """ CBR cycle step for the given user for the given movie and rating """
         rated = self.cb.next_test_case()
+
         sim_users = self.retrieve(rated.user, neighbors=self.neighbors) # Retrieves a set of user ids
         sim_movies = self.reuse(rated.user, neighbors=sim_users, N=self.movies_per_neighbors) # Retrieves a set of MovieInfo
+
+        print "Movies recommended for user %d" % rated.user
+        for m in sim_movies:
+            print m
+
         feedback, retain_rated_case = self.review(rated, sim_movies)
         self.retain(rated, feedback, retain_rated_case)
 
@@ -170,6 +176,11 @@ class MovieRecommender(MovieRecommenderInterface):
         """ See base class """
         print "Review phase for user %d" % rated.user
 
+        # Tweakable and move final to the costructor of the class
+        self.threshold_keep_movie = 1
+        self.high_similarity_treshold = 0.55
+        self.low_similarity_threshold = 0.40
+
         sum_similarity = 0
         # Fill feedback of recommendations
         for rec in recommended:
@@ -206,11 +217,12 @@ class MovieRecommender(MovieRecommenderInterface):
                     print "Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie)
                     rec.feedback = FeedbackType.NEUTRAL
 
+        mean_similarity = float (sum_similarity / len(recommended))
         """ Place for adding deciding point for retaining / not retaining case, should use similarities caluclated and mean rating !"""
-        similarity = float (sum_similarity / len(recommended))
-        print "Overall similarity ", similarity
-        # At the moment we retain every case - test of the update class works 
-        return recommended, True
+        # bool value for retaining or not retaining the case
+        retain_rated_case = (abs(rated.rating - self.cb.get_mean_movie_rating(rated.movie)) > self.threshold_keep_movie) and (mean_similarity > self.threshold.high_similarity_treshold  or mean_similarity < self.threshold.low_similarity_threshold)
+
+        return recommended, retain_rated_case
 
 
     def retain(self, rated_case, feedback_list, retain_rated_case):

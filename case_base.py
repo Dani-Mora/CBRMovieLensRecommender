@@ -290,6 +290,15 @@ class CaseBase(object):
         # Multiply and replace nans to 0
         return np.nan_to_num(genres_sum_mat * mean_ratings)
 
+    def _get_genre_user_representation(self, movie_id):
+        """ Return the list of the genres as category for CandidateInfo representation """
+        genres_boolean = self._get_genre_vector(movie_id, list=True)
+        genre_indices = [i for i, x in enumerate(genres_boolean) if x]
+        genre_representation = []
+        for index in genre_indices:
+            genre_representation.append(self.genres[index])
+        return genre_representation
+
 
     def _get_user_movies(self, user_id, list=False):
         """ Returns the movies a user has rated
@@ -395,6 +404,10 @@ class CaseBase(object):
         for index, neighbor in enumerate(neighbors):
             aff_vec[index] = self.user_affinity.get_affinity(user_id, neighbor)
         return aff_vec
+
+    def _get_movie_name(self, movie_id):
+        """ Return the name of the movie """
+        return self.movies[self.movies['movie_id'] == movie_id]['name'].iloc[0]
 
 
     def update_user_affinity(self, user_id, candidate_with_feedback):
@@ -620,6 +633,8 @@ class CaseBase(object):
             candidate: CandidateInfo class
         """
         movie_genres = self._get_genre_vector(movie_id)
+        genre_representation = self._get_genre_user_representation(movie_id)
+        name = self._get_movie_name(movie_id)
 
         # Compute score
         user_term = self.alpha * self.get_user_similarity(user_id, neigh_id) \
@@ -638,8 +653,10 @@ class CaseBase(object):
 
         score = user_term + rating_term + genre_term + will_term # + last_term
 
-        return CandidateInfo(movie_id=movie_id,
+        return CandidateInfo(name=name,
+                             movie_id=movie_id,
                              user_id=user_id,
                              neighbor_id_rated=neigh_id,
                              score=score,
-                             genres=movie_genres)
+                             genres=movie_genres,
+                             genre_representation=genre_representation)
