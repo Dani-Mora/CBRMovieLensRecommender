@@ -226,10 +226,6 @@ class MovieRecommender(MovieRecommenderInterface):
     def reuse(self, user_id, neighbors):
         """ See base class """
 
-        # Save user's neighbors in CaseBase for user_affinity
-        #neighbor_id_list = [(n[0]) for n in neighbors]
-        #self.cb.save_user_neighbors(user_id, neighbor_id_list)
-
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
@@ -314,12 +310,7 @@ class MovieRecommender(MovieRecommenderInterface):
 
 
     def retain(self, rated_case, feedback_list, retain_rated_case):
-        """ See base class
-        Args:
-           rated_case: RatingInfo about the reviewed case
-           feedback_list: List of CandidateInfo containing feedback from thr review phase
-           retain_rated_case: True / False value for saving the case to the CaseBase
-       """
+        """ See base class """
 
         if retain_rated_case:
 

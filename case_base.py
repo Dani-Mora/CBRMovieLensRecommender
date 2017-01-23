@@ -60,10 +60,6 @@ class CaseBase(object):
         # Counter for test_rating set
         self.count = 0
 
-        # User's neighbor caching for user affinity
-        # Key is user ID, value is list of neighbor IDs
-        #self.user_neighbors = {}
-
         # User similarity caching
         self.user_cache = {}
         # Check ratios are in correct interval to avoid unexpected behaviors
@@ -166,10 +162,10 @@ class CaseBase(object):
     def update_case_base(self, users, movies, ratings, timestamps):
         """ Updates the ratings case base with the input lists.
         Args:
-            - users: List of users of the new ratings
-            - movies: List of movies of the new ratings
-            - ratings: List of new rating scores
-            - timestamps: List of new timestamp
+            users: List of users of the new ratings
+            movies: List of movies of the new ratings
+            ratings: List of new rating scores
+            timestamps: List of new timestamp
         """
         frame = pd.DataFrame({'user_id': users, 'movie_id': movies, 'rating': ratings, 'timestamp': timestamps})
         self.ratings = pd.concat([self.ratings, frame], ignore_index=True)
@@ -618,7 +614,7 @@ class CaseBase(object):
                         + \beta * mean_rating(m)
                         + \gamma * genre(u1, m)
                         + \theta * willingness(u1, m)
-                        + |omega * user_willigness(u1, u2)
+                        + \omega * user_willigness(u1, u2)
             Where:
 
                 - 'similarity(u1,u2)' is the inverse of the disparity of scores in

@@ -1,5 +1,4 @@
 
-import numpy as np
 from movies import FeedbackType
 
 """ File for including user(customer)-related code """

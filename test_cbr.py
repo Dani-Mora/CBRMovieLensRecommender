@@ -7,7 +7,7 @@ check_download_data()
 # Starting point of the CBR Recommender
 # Create and initialize recommender
 rec = MovieRecommender(path=MOVIELENS1M_DATA_FOLDER)
-scores, sims = rec.test_cbr(test_size=10)
+scores, sims = rec.test_cbr(test_size=50)
 
 save_list(scores, 'scores.dat')
 save_list(sims, 'sims.dat')
