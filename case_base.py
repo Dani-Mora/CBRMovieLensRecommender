@@ -2,11 +2,8 @@ from __future__ import division
 from users import *
 from utils import *
 import pandas as pd
-from tqdm import tqdm
 from scipy import stats
 from movies import RatingInfo, CandidateInfo
-from collections import defaultdict
-import itertools
 import random
 
 logger = initialize_logging('casebase')
@@ -43,9 +40,6 @@ class CaseBase(object):
                                               modifier=update_rate)  # User recommendation feedback
         self.genre_willigness = AffinityCaseBase(initial_preference=initial_affinity,
                                                  modifier=update_rate)  # Recommendations feedback
-        self.inverted_file = {}  # Store movie - user who rated it
-        self.train_indexes = {}  # Stores training movie identifiers for each user
-        self.test_indexes = {}  # Stores the movie identifiers for each user
 
         # Pandas datasets
         self.movies, self.users = None, None
@@ -55,7 +49,6 @@ class CaseBase(object):
         self.popular = None  # Popular movies
         self.mean_movie_rating = None  # Mean score for each movie
         self.mean_user_rating = None  # Mean rating for each user
-        self.test_ratings = None
 
         # Movie score parameters
         self.alpha = alpha
@@ -198,13 +191,16 @@ class CaseBase(object):
         self.ratings = self.all_ratings.loc[self.all_ratings.index.values[train]]
         self.test_ratings = self.all_ratings.loc[self.all_ratings.index.values[test]]
 
+        # Sort test ratings so they are grouped by the user they belong to
+        self.test_ratings = self.test_ratings.sort_values(['user_id'])
+
         # Iterate over all users
-        users = self._get_users_list()
+        '''users = self._get_users_list()
         for u_id in tqdm(users, desc="Initializing user information"):
 
             # Fill inverted file index with user movies
             for m_id in self._get_user_movies(u_id, list=True):
-                self.add_user_rating(u_id, m_id)
+                self.add_user_rating(u_id, m_id)'''
 
         # Compute global structures
         logger.info("Initializing movie popularity ...")
@@ -260,16 +256,16 @@ class CaseBase(object):
         return self.users['user_id'].tolist()
 
 
-    def add_user_rating(self, user_id, movie_id):
+    '''def add_user_rating(self, user_id, movie_id):
         """ Adds a user rating to the inverted file indexed structure """
         if movie_id not in self.inverted_file:
             self.inverted_file[movie_id] = []
-        self.inverted_file[movie_id].append(user_id)
+        self.inverted_file[movie_id].append(user_id)'''
 
 
     def _find_users_by_movies(self, movie_id):
         """ Returns the user identifiers related to users who saw the input movie """
-        return self.inverted_file[movie_id]
+        return self.ratings[self.ratings['movie_id'] == movie_id]['user_id'].tolist()
 
 
     def _get_user_preferences(self, user_id):
@@ -452,7 +448,7 @@ class CaseBase(object):
 
         def get_random_neighbor(movie_id):
             """ Returns a random user that has been input movie """
-            users = self.inverted_file[movie_id]
+            users = self._find_users_by_movies(movie_id)
             return users[random.randint(0, len(users) - 1)]
 
         def create_popular_candidate(row):
@@ -526,8 +522,8 @@ class CaseBase(object):
             mi_genres, mj_genres: Genres of movies to calculate Jaccard similarity
         """
         # Find count of users rated by given movie_id
-        u_i = set(self.inverted_file[mi])
-        u_j = set(self.inverted_file[mj])
+        u_i = set(self._find_users_by_movies(mi))
+        u_j = set(self._find_users_by_movies(mj))
 
         # Count of users rated both movies
         rated_both = len(u_i.intersection(u_j))

@@ -139,6 +139,7 @@ tf2-kdl==0.5.13
 tf2-py==0.5.13
 tf2-ros==0.5.13
 tf2-sensor-msgs==0.5.13
+tqdm==4.11.0
 tornado==4.4.2
 traitlets==4.3.1
 wcwidth==0.1.7
