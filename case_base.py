@@ -23,7 +23,8 @@ class CaseBase(object):
                  gamma=0.25,
                  theta=0.25,
                  omega=0.10,
-                 train_ratio=0.9):
+                 train_ratio=0.9,
+                 ratings_ratio=1.0):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
@@ -35,6 +36,7 @@ class CaseBase(object):
             theta: Weight for the willigness of user preferences in the movie score.
             omega: Weight for the willigness of user affinity in the movie score.
             train_ratio: Fraction of ratings belonging to training.
+            ratings_ratio: Ratio in interval (0, 1] of the original ratings to consider in the system.
         """
         # Case base structures
         self.user_affinity = AffinityCaseBase(initial_preference=initial_affinity,
@@ -79,21 +81,33 @@ class CaseBase(object):
         check_ratio('Gamma', gamma)
         check_ratio('Thetha', theta)
         check_ratio("Training ratio", train_ratio)
+        check_ratio("Ratings ratio", ratings_ratio)
 
         # Read data
-        self._read_data(path)
+        self._read_data(path, ratings_ratio)
 
 
     """ Read data from files"""
 
 
-    def _read_data(self, path):
+    def _read_data(self, path, ratio):
         """ Reads Movielens 1M data into the class """
         # Make sure ratings indexed by user_id and movie_id
         self.all_ratings = pd.read_csv(os.path.join(path, 'ratings.dat'),
                                        sep="::",
                                        names=['user_id', 'movie_id', 'rating', 'timestamp'],
                                        engine='python')
+
+        # Select subset, if requested
+        if ratio < 1.0:
+            # Get a subset of users from the ratings
+            unique_users = self.all_ratings['user_id'].unique()
+            total = len(unique_users)
+            subset_users = unique_users[np.random.permutation(total)[:int(total * ratio)]].tolist()
+            self.all_ratings = self.all_ratings[self.all_ratings['user_id'].isin(subset_users)]
+            logger.info("Got subset of ratings of %d instances" % len(self.all_ratings.index.values))
+
+        # Set rating indexes
         self.all_ratings.set_index(['user_id', 'movie_id'])
 
         # Users indexed by id. Each user has at least 20 ratings. No missing data
@@ -248,7 +262,7 @@ class CaseBase(object):
 
     def add_user_rating(self, user_id, movie_id):
         """ Adds a user rating to the inverted file indexed structure """
-        if not movie_id in self.inverted_file:
+        if movie_id not in self.inverted_file:
             self.inverted_file[movie_id] = []
         self.inverted_file[movie_id].append(user_id)
 
@@ -312,82 +326,6 @@ class CaseBase(object):
                         on=['movie_id'])
 
 
-    '''def get_user_candidates(self, user_id, num_movies, num_neighs, max_k, min_k, sim_thresh):
-        """ Returns the set of possible candidates for neighbors of input user
-        Args:
-            user_id: User identifier
-            num_movies: Number of interest movies to user for the user
-            num_neighs: Maximum number of users to compute
-            max_k: Maximum number of interest movies to be shared between neighbors
-            min_k: Minimum number of interest movies to be shared between neighbors
-            sim_thresh: Maximum rating distance between movies to be considered shared between two users
-        """
-
-        # Get movies of interest as top and lowest rated movies for user
-        movies = self._get_user_ratings(user_id).sort_values(['rating'], ascending=[False])
-        top_movies = movies.head(int(num_movies/2))['movie_id'].tolist()
-        lowest_rated_movies = movies.tail(int(num_movies/2))['movie_id'].tolist()
-        list_films = top_movies + lowest_rated_movies
-
-        # Get ratings for movies of interest
-        movies_ratings = {}
-        for movie in list_films:
-            movies_ratings[movie] = self._get_user_movie_rating_raw(user_id, movie)
-
-        list_control_users = defaultdict()
-        set_selected_users = set()
-        set_discarded_users = set()
-        set_ignore_users = set()
-
-        for film_index in range(len(list_films)):
-
-            if num_neighs <= len(set_selected_users):
-                break
-            m_id = list_films[film_index]
-            # Select the users who have seen movie 'm_id'
-            list_users_movie = self._find_users_by_movies(m_id)
-            for user in list_users_movie:
-
-                if user in set_ignore_users:
-                    continue
-                if not user in list_control_users:
-                    list_control_users[user] = 0
-                list_control_users[user] += 1 if abs(movies_ratings[m_id] - self._get_user_movie_rating_raw(user, m_id)) \
-                                                 < sim_thresh else 0
-                if list_control_users[user] == max_k/2:
-                    # If the user has seen at least K/2, we exhaustively research it
-                    list_user_ratings = self._get_user_ratings(user).sort_values(['rating'], ascending=[False])
-                    # We check all remaining films
-                    for i in range(film_index+1, len(list_films)):
-                        new_m_id = list_films[i]
-                        if new_m_id in list_user_ratings:
-                            list_control_users[user] += \
-                                1 if abs(movies_ratings[new_m_id] - self._get_user_movie_rating_raw(user, new_m_id)) \
-                                     < sim_thresh else 0
-                        if list_control_users[user] == max_k:
-                            # If there are K matches, we keep the user
-                            set_selected_users.add(user)
-                            set_ignore_users.add(user)
-                            break
-                    if list_control_users[user] < max_k:
-                        if list_control_users[user] < min_k:
-                            set_discarded_users.add(user)
-                        set_ignore_users.add(user)
-                        # If there are not K matches, we discard the user
-
-        # If we have not found enough matches, we already have the number of matches nevertheless.
-        new_k = max_k - 1
-        while len(set_selected_users) < num_neighs and new_k >= min_k:
-            new_k -= 1
-            for user_id, num_matches in list_control_users.items():
-                if user_id in set_selected_users or user in set_discarded_users:
-                    continue
-                if num_matches == new_k:
-                    set_selected_users.add(user_id)
-
-        return set_selected_users'''
-
-
     def get_user_candidates(self, user_id, num_movies, num_neighs, max_k, min_k, sim_thresh):
         """ Returns the set of possible candidates for neighbors of input user
         Args:
@@ -406,7 +344,7 @@ class CaseBase(object):
         list_films = top_movies + lowest_rated_movies
 
         # Iterate from all movies until we get to min_k in decreasing order
-        current_k = max_k
+        current_k = min(len(list_films), max_k)
         total_neighs = set()
         while current_k >= min_k:
 
@@ -575,7 +513,9 @@ class CaseBase(object):
     def get_movie_similarity(self, mi, mi_genres, mj, mj_genres):
         """ Returns the similarity between two movies as:
 
-            movie_sim(m_i, m_j) = (|intersect(U_i, U_j)| / min(|U_i|, |U_j|)) + jaccard_similarity_genres + pearson_ratings_both_movies
+            movie_sim(m_i, m_j) = (|intersect(U_i, U_j)| / min(|U_i|, |U_j|))
+                                + jaccard_similarity_genres
+                                + pearson_ratings_both_movies
 
             Where
                 U_i is the set of users that has seen movie m_i
@@ -594,7 +534,7 @@ class CaseBase(object):
         min_rated = min(len(u_i), len(u_j))
         term_1 = (float(rated_both) / float(min_rated))
 
-        # Fastest numpy array initailization
+        # Fastest numpy array initialization
         ratings_mi = np.empty(rated_both)
         ratings_mj = np.empty(rated_both)
 
@@ -607,6 +547,7 @@ class CaseBase(object):
 
         # Calculate pearson correlation between ratings of movies both users rated
         pearson = stats.pearsonr(ratings_mi, ratings_mj)[0]
+        pearson = 0.0 if np.isnan(pearson) else pearson
 
         # Index genres to use them for Jaccard similarity
         genre_indices_mi = [i for i, x in enumerate(mi_genres) if x]

@@ -103,7 +103,7 @@ def pearson_correlation(items1, items2, mean1, mean2):
     """ Returns the Pearson correlation between the two input elements """
     num = sum((items1 - mean1) * (items2 - mean2))
     den = np.sqrt(sum(np.square(items1 - mean1))) * np.sqrt(sum(np.square(items2 - mean2)))
-    return num / den
+    return num / den if den != 0 else 0.0
 
 
 def save_list(inp, path):

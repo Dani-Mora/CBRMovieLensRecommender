@@ -69,7 +69,8 @@ class MovieRecommender(MovieRecommenderInterface):
                  movie_threshold=0.40,
                  high_similarity_treshold=0.55,
                  low_similarity_threshold=0.40,
-                 update_value=5):
+                 update_value=5,
+                 ratings_ratio=1.0):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
@@ -96,6 +97,7 @@ class MovieRecommender(MovieRecommenderInterface):
             low_similarity_threshold: Maximum value of the mean rating of recommended movies for a case
                 to be kept.
             update_value: Number of cases that we need to process before updating the global stats.
+            ratings_ratio: Ratio in interval (0, 1] of the original ratings to consider in the system.
         """
         self.cb = CaseBase(path,
                            initial_affinity=initial_affinity,
@@ -105,7 +107,8 @@ class MovieRecommender(MovieRecommenderInterface):
                            gamma=gamma,
                            theta=theta,
                            omega=omega,
-                           train_ratio=train_ratio)
+                           train_ratio=train_ratio,
+                           ratings_ratio=ratings_ratio)
         self.cb.initialize()
 
         # Neighbor computation parameters
@@ -142,7 +145,7 @@ class MovieRecommender(MovieRecommenderInterface):
         for m in sim_movies:
             logger.debug(m)
 
-        feedback, retain_rated_case = self.review(rated, sim_movies)
+        feedback, retain_rated_case, _ = self.review(rated, sim_movies)
         self.retain(rated, feedback, retain_rated_case)
 
 
@@ -191,8 +194,6 @@ class MovieRecommender(MovieRecommenderInterface):
             count += 1
 
         return scores, sims
-
-
 
 
     """ Implementations of the Recommender interface """
