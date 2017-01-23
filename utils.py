@@ -104,3 +104,10 @@ def pearson_correlation(items1, items2, mean1, mean2):
     num = sum((items1 - mean1) * (items2 - mean2))
     den = np.sqrt(sum(np.square(items1 - mean1))) * np.sqrt(sum(np.square(items2 - mean2)))
     return num / den
+
+
+def save_list(inp, path):
+    """ Saves input list into the given path """
+    with open(path, 'w') as f:
+        for elem in inp:
+            f.write(str(elem) + '\n')

@@ -1,7 +1,6 @@
 from utils import *
 from case_base import CaseBase
 from movies import FeedbackType
-import sys
 
 class MovieRecommenderInterface(object):
 
@@ -33,7 +32,9 @@ class MovieRecommenderInterface(object):
             rated: RatedInfo class with the next rated movie recommended
             recommended: List of CandidateInfo objects representing the recommended movies
         Returns:
-            feedback: Recommendation feedback (FeedbackInfo class)
+            recommended: List of recommended instances (FeedbackInfo class)
+            retain_rated_case: Whether to retain input case or not
+            mean_similarity: Mean similarity between rated movie and recommendations
         """
 
 
@@ -145,7 +146,57 @@ class MovieRecommender(MovieRecommenderInterface):
         self.retain(rated, feedback, retain_rated_case)
 
 
+    def test_cbr(self, test_size=100):
+        """ Queries the test data into the CBR
+        Args:
+            test_size: Number of tests instances to use
+        Returns
+            scores: Mean movie score at each test iteration.
+            sims: Mean similarity between rated and recommended item at each test iteration.
+        """
+
+        logger.info('Testing CBR ...')
+
+        # Log values
+        scores, sims = [], []
+
+        # Iterate while there are cases left
+        rated = self.cb.next_test_case()
+        count = 1
+        while rated is not None and count <= test_size:
+
+            logger.info('Test iteration %i ...' % count)
+
+            # RETRIEVE phase: get set of user ids
+            sim_users = self.retrieve(rated.user)
+
+            # REUSE phase: get set of candidate movies
+            sim_movies = self.reuse(rated.user, neighbors=sim_users)
+            #logger.debug("Movies recommended for user %d" % rated.user)
+            #for m in sim_movies:
+            #    logger.debug(m)
+
+            # REVIEW phase: compare recommendations to rated movie
+            feedback, retain_rated_case, mean_sim = self.review(rated, sim_movies)
+
+            # RETAIN phase: retain information if needed
+            self.retain(rated, feedback, retain_rated_case)
+
+            # Store values for current iteration (scores from reuse and similarity from review)
+            scores.append(np.mean([x.score for x in sim_movies]))
+            sims.append(mean_sim)
+
+            # Next case
+            rated = self.cb.next_test_case()
+            count += 1
+
+        return scores, sims
+
+
+
+
     """ Implementations of the Recommender interface """
+
 
     def retrieve(self, user_id):
         """ See base class """
@@ -179,19 +230,23 @@ class MovieRecommender(MovieRecommenderInterface):
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
-        # Iterate over retrieved neighbors to generate movie candidates
-        for (neighbor_id, _) in neighbors:
-            # Create a candidate for each unseen movies
-            unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, self.movies_per_neighbor)
-            for m_id in unseen_movies:
-                candidate = self.cb.get_movie_candidate(movie_id=m_id, user_id=user_id, neigh_id=neighbor_id)
-                movies.append(candidate)
+        if len(neighbors) == 0:
+            # If no neighbors found, return popular movies
+            unique_recommendations = self.cb.get_popular_candidates(user_id)
+        else:
+            # Iterate over retrieved neighbors to generate movie candidates
+            for (neighbor_id, _) in neighbors:
+                # Create a candidate for each unseen movies
+                unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, self.movies_per_neighbor)
+                for m_id in unseen_movies:
+                    candidate = self.cb.get_movie_candidate(movie_id=m_id, user_id=user_id, neigh_id=neighbor_id)
+                    movies.append(candidate)
 
-        # Unique recommendations
-        dict_candidate = {}
-        for m in movies:
-            dict_candidate[m.movie] = m
-        unique_recommendations = dict_candidate.values()
+            # Unique recommendations
+            dict_candidate = {}
+            for m in movies:
+                dict_candidate[m.movie] = m
+            unique_recommendations = dict_candidate.values()
 
         # Return top movies
         return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:self.rec_movies]
@@ -246,7 +301,7 @@ class MovieRecommender(MovieRecommenderInterface):
                              (mean_similarity < self.low_similarity_threshold)
         retain_rated_case = rating_diff_bool and non_redundant_bool
 
-        return recommended, retain_rated_case
+        return recommended, retain_rated_case, mean_similarity
 
 
     def retain(self, rated_case, feedback_list, retain_rated_case):

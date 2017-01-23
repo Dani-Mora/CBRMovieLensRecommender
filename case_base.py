@@ -23,7 +23,7 @@ class CaseBase(object):
                  gamma=0.25,
                  theta=0.25,
                  omega=0.10,
-                 train_ratio=0.8):
+                 train_ratio=0.9):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
@@ -215,7 +215,7 @@ class CaseBase(object):
         """ Computes a data frame sorting movies by its popularity (number of ratings) """
         ratings_count = self.ratings.groupby(['movie_id'])['rating'].count().reset_index()
         sorted_ids = ratings_count.sort_values(['rating'], ascending=[False])
-        self.popular = pd.merge(sorted_ids, self.movies, on=['movie_id'])
+        self.popular = pd.merge(sorted_ids, self.movies, left_on=['movie_id'], right_on=['movie_id'])
 
 
     def update_mean_movie_rating(self):
@@ -312,7 +312,7 @@ class CaseBase(object):
                         on=['movie_id'])
 
 
-    def get_user_candidates(self, user_id, num_movies, num_neighs, max_k, min_k, sim_thresh):
+    '''def get_user_candidates(self, user_id, num_movies, num_neighs, max_k, min_k, sim_thresh):
         """ Returns the set of possible candidates for neighbors of input user
         Args:
             user_id: User identifier
@@ -385,10 +385,10 @@ class CaseBase(object):
                 if num_matches == new_k:
                     set_selected_users.add(user_id)
 
-        return set_selected_users
+        return set_selected_users'''
 
 
-    '''def get_user_candidates(self, user_id, num_movies, min_neighs, max_k, min_k, sim_thresh):
+    def get_user_candidates(self, user_id, num_movies, num_neighs, max_k, min_k, sim_thresh):
         """ Returns the set of possible candidates for neighbors of input user
         Args:
             user_id: User identifier
@@ -419,7 +419,7 @@ class CaseBase(object):
             total_neighs = total_neighs.union(neighbors_k)
 
             # If we arrived to number of neighbors, stop. Otherwise, keep iterating
-            if len(total_neighs) >= min_neighs:
+            if len(total_neighs) >= num_neighs:
                 break
             else:
                 current_k -= 1
@@ -445,7 +445,7 @@ class CaseBase(object):
             saw_movie = set(self._find_users_by_movies(m))
             users_seen = saw_movie if users_seen is None else users_seen.intersection(saw_movie)
 
-        logger.info('[K={}] Neighbors who saw all movies for {}'.format(current_k, users_seen))
+        #logger.info('[K={}] Neighbors who saw all movies for {}'.format(current_k, users_seen))
 
         # Check whether any of the users have correlation
         candidates = []
@@ -467,7 +467,7 @@ class CaseBase(object):
             if selected:
                 candidates.append(u)
 
-        return candidates'''
+        return candidates
 
 
     def save_user_neighbors(self, user_id, neighbors):
@@ -503,6 +503,33 @@ class CaseBase(object):
 
 
     """ Movie-related functions """
+
+
+    def get_popular_candidates(self, user_id, num=20):
+        """ Returns the most popular movies not seen by the user
+         Args:
+            user_id: User query identifier
+            num: Number of movies to retrieve
+         """
+
+        def get_random_neighbor(movie_id):
+            """ Returns a random user that has been input movie """
+            users = self.inverted_file[movie_id]
+            return users[random.randint(0, len(users) - 1)]
+
+        def create_popular_candidate(row):
+            """ Creates a popular candidate from a rating row """
+            return CandidateInfo(name=row['name'],
+                                 movie_id=row['movie_id'],
+                                 user_id=user_id,
+                                 neighbor_id_rated=get_random_neighbor(row['movie_id']),
+                                 score=row['rating'],
+                                 genres=row[self.genres],
+                                 genre_representation=self._get_genre_categories(row['movie_id']))
+
+        not_rated = self.popular[self.popular['movie_id'].isin(self._get_user_movies(user_id)) == False]
+        not_rated_info = not_rated.head(n=num)[['name', 'movie_id', 'rating'] + self.genres]
+        return [create_popular_candidate(row) for _, row in not_rated_info.iterrows()]
 
 
     def get_suggestions(self, user_id, neighbor_id, movies_per_neighbor):
@@ -627,16 +654,16 @@ class CaseBase(object):
 
     def get_user_similarity(self, user1, user2):
         """ Checks whether the input user similarity has been cached """
-        if not user1 in self.user_cache or not user2 in self.user_cache:
+        if user1 not in self.user_cache and user2 not in self.user_cache:
             self.user_cache[user1] = {}
             self.user_cache[user1][user2] = self._compute_user_similarity(user1, user2)
             return self.user_cache[user1][user2]
         elif user1 in self.user_cache:
-            if not user2 in self.user_cache[user1]:
+            if user2 not in self.user_cache[user1]:
                 self.user_cache[user1][user2] = self._compute_user_similarity(user1, user2)
-                return self.user_cache[user1][user2]
+            return self.user_cache[user1][user2]
         else:
-            if not user1 in self.user_cache[user2]:
+            if user1 not in self.user_cache[user2]:
                 self.user_cache[user2][user1] = self._compute_user_similarity(user1, user2)
             return self.user_cache[user2][user1]
 
@@ -705,8 +732,7 @@ class CaseBase(object):
         name = self._get_movie_name(movie_id)
 
         # Compute score
-        user_term = self.alpha * self.get_user_similarity(user_id, neigh_id) \
-                    * self._get_user_movie_rating(neigh_id, movie_id)
+        user_term = self.alpha * self.get_user_similarity(user_id, neigh_id) * self._get_user_movie_rating(neigh_id, movie_id)
         rating_term = self.beta * self.get_mean_movie_rating(movie_id)
         genre_term = self.gamma * np.dot(self._get_user_preferences(user_id), movie_genres)
         will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
