@@ -1,28 +1,26 @@
 from utils import *
-from case_base import CaseBase, SimilarityType
+from case_base import CaseBase
 from movies import FeedbackType
-import pandas as pd
+import sys
 
 class MovieRecommenderInterface(object):
 
     """ Interface for Movie Recommender """
 
-    def retrieve(self, user_id, N):
-        """ CBR retrieve cycle that retrieves N similar users for the given user
+    def retrieve(self, user_id):
+        """ CBR retrieve cycle that retrieves similar users for the given user
         Args:
              user_id: Identifier of the query user
-             N: Number of users ids to retrieve
         Returns:
-            users: List of N identifiers of similar users
+            users: List of identifiers of similar users
         """
 
 
-    def reuse(self, user_id, neighbors, N):
+    def reuse(self, user_id, neighbors):
         """ CBR reuse cycle that returns suitable movies to recommend to query user
         Args:
             user_id: Identifier of the query user
             neighbors: Identifier of the neighboring users
-            N: Maximum number of movies to recommend for each neighbor
         Returns:
             movies: List of recommended movies for the user (CandidateInfo class)
         """
@@ -49,75 +47,99 @@ class MovieRecommenderInterface(object):
 
 class MovieRecommender(MovieRecommenderInterface):
 
-
     def __init__(self,
                  path,
-                 neighbors=10,
                  movies_per_neighbor=10,
-                 top_movies=10,
+                 rec_movies=5,
                  initial_affinity=0.5,
-                 correlation_weight=0.75,
-                 min_movies_candidate=0.33,
                  update_rate=0.1,
                  alpha=0.25,
                  beta=0.15,
                  gamma=0.20,
                  theta=0.1,
+                 omega=0.1,
+                 train_ratio=0.8,
+                 shared_movies=8,
+                 max_neighbors=5,
+                 max_shared=6,
+                 min_shared=3,
+                 max_sim_threshold=1.50,
+                 threshold_keep_movie=1,
                  movie_threshold=0.40,
-                 sim_measure=SimilarityType.PEARSON):
+                 high_similarity_treshold=0.55,
+                 low_similarity_threshold=0.40,
+                 update_value=5):
         """ Constructor of the class
         Args:
             path: Path to MovieLens 1M dataset.
-            neighbors: Number of neighbors to retrieve in the CBR cycle.
-            movies_per_neighbor: Number of movies per neighbor to extract
-            top_movies: Top rated movies to use for searching candidates.
+            movies_per_neighbor: Number of movies per neighbor to extract.
+            rec_movies: Number of recommended movies for each query.
             initial_affinity: Initial affinity for users.
-            correlation_weight: Weight in interval [0, 1] for the rating correlation
-                in user similarity computation.
-            min_movies_candidate: Ratio of the mean ratings per user that two users need two share
-                at least to be considered neighbors. By default one third of the movies must be shared.
             update_rate: Pace at which we update the affinity of the users and the genre in recommendations.
             alpha: Weight for the user correlation in the movie score.
             beta: Weight for the popularity (mean rating in the system) in the movie score.
             gamma: Weight for the correlation of user preferences in the movie score.
             theta: Weight for the willigness of user preferences in the movie score.
-            movie_threshold: Maximum distance between two movies to be considered similar
-            sim_measure: Similarity measure used to compute user similarities.
+            omega: Weight for the willigness of user affinity in the movie score.
+            train_ratio: Fraction of ratings belonging to training.
+            shared_movies: Number of top-rated movies from a user to use for computing his/her neighbors.
+            max_neighbors: Maximum number of neighbors to compute for each user.
+            max_shared: Maximum number of movies to be shared by a neighbor.
+            min_shared: Minimum number of movies to be shared by a neighbor.
+            max_sim_threshold: Maximum rating distance between movies to be considered shared between two users.
+            threshold_keep_movie: Maximum difference for a case to be kept between a new movie rating
+                and the mean system average.
+            movie_threshold: Maximum distance between two movies to be considered similar.
+            high_similarity_treshold: Minimum value of the mean rating of recommended movies for a case
+                to be kept.
+            low_similarity_threshold: Maximum value of the mean rating of recommended movies for a case
+                to be kept.
+            update_value: Number of cases that we need to process before updating the global stats.
         """
         self.cb = CaseBase(path,
-                           top_movies=top_movies,
                            initial_affinity=initial_affinity,
-                           correlation_weight=correlation_weight,
-                           min_movies_candidate=min_movies_candidate,
                            update_rate=update_rate,
                            alpha=alpha,
                            beta=beta,
                            gamma=gamma,
                            theta=theta,
-                           sim_measure=sim_measure)
+                           omega=omega,
+                           train_ratio=train_ratio)
         self.cb.initialize()
 
-        self.neighbors = neighbors
-        self.movies_per_neighbors = movies_per_neighbor
+        # Neighbor computation parameters
+        self.shared_movies = shared_movies
+        self.max_neighbors = max_neighbors
+        self.max_shared = max_shared
+        self.min_shared = min_shared
+        self.max_sim_threshold = max_sim_threshold
+
+        # Reuse phase parameters
+        self.movies_per_neighbor = movies_per_neighbor
+        self.rec_movies = rec_movies
+
+        # Review phase parameters
         self.movie_thresh = movie_threshold
+        self.threshold_keep_movie = threshold_keep_movie
+        self.high_similarity_treshold = high_similarity_treshold
+        self.low_similarity_threshold = low_similarity_threshold
 
-        # Variables helper for retain phase
-        self.N = 0
+        # Retain phase parameters
+        self.N = 0  # Counter for test cases
         self.case_to_add = []
-        self.update_value = 5
+        self.update_value = update_value
 
 
-    # Example of CBR cycle
     def _process_next_case(self):
         """ CBR cycle step for the given user for the given movie and rating """
         rated = self.cb.next_test_case()
 
-        sim_users = self.retrieve(rated.user, neighbors=self.neighbors) # Retrieves a set of user ids
-        sim_movies = self.reuse(rated.user, neighbors=sim_users, N=self.movies_per_neighbors) # Retrieves a set of MovieInfo
+        sim_users = self.retrieve(rated.user)  # Retrieves a set of user ids
+        sim_movies = self.reuse(rated.user, neighbors=sim_users)  # Set of MovieInfo
 
-        print "Movies recommended for user %d" % rated.user
+        logger.debug("Movies recommended for user %d" % rated.user)
         for m in sim_movies:
-            print m
+            logger.debug(m)
 
         feedback, retain_rated_case = self.review(rated, sim_movies)
         self.retain(rated, feedback, retain_rated_case)
@@ -125,39 +147,42 @@ class MovieRecommender(MovieRecommenderInterface):
 
     """ Implementations of the Recommender interface """
 
-
-    def retrieve(self, user_id, neighbors=10):
+    def retrieve(self, user_id):
         """ See base class """
-
-        print "Retrieving phase for user %d" % user_id
+        logger.info("Retrieving phase for user %d" % user_id)
 
         # User candidates as those who has rated at least one movie in common with query
-        candidates = self.cb.get_user_candidates(user_id)
+        candidates = self.cb.get_user_candidates(user_id,
+                                                 num_movies=self.shared_movies,
+                                                 num_neighs=self.max_neighbors,
+                                                 max_k=self.max_shared,
+                                                 min_k=self.min_shared,
+                                                 sim_thresh=self.max_sim_threshold)
 
         # Get shared movies and correlation for candidates
-        print "Obtaining user similarities (%d)" % len(candidates)
+        logger.info("Obtaining user similarities (%d)" % len(candidates))
         stats = [(c_id, self.cb.get_user_similarity(user_id, c_id)) for c_id in candidates]
 
         # Return top
-        print "Sorting user similarities"
-        sorted_stats = sorted(stats, key=lambda tup: tup[1], reverse=True)
-        return sorted_stats[:neighbors]
+        logger.debug("Sorting user similarities")
+        sorted_stats = sorted(stats, key=lambda tup: tup[1], reverse=True)[:self.max_neighbors]
+        return sorted_stats
 
 
-    def reuse(self, user_id, neighbors, N):
+    def reuse(self, user_id, neighbors):
         """ See base class """
 
         # Save user's neighbors in CaseBase for user_affinity
         neighbor_id_list = [(n[0]) for n in neighbors]
         self.cb.save_user_neighbors(user_id, neighbor_id_list)
 
-        print "Reuse phase for user %d" % user_id
+        logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
         # Iterate over retrieved neighbors to generate movie candidates
         for (neighbor_id, _) in neighbors:
-            # Create a candidate for all unseen movies
-            unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, N)
+            # Create a candidate for each unseen movies
+            unseen_movies = self.cb.get_suggestions(user_id, neighbor_id, self.movies_per_neighbor)
             for m_id in unseen_movies:
                 candidate = self.cb.get_movie_candidate(movie_id=m_id, user_id=user_id, neigh_id=neighbor_id)
                 movies.append(candidate)
@@ -168,18 +193,13 @@ class MovieRecommender(MovieRecommenderInterface):
             dict_candidate[m.movie] = m
         unique_recommendations = dict_candidate.values()
 
-        # Return N top movies
-        return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:N]
+        # Return top movies
+        return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:self.rec_movies]
 
 
     def review(self, rated, recommended):
         """ See base class """
-        print "Review phase for user %d" % rated.user
-
-        # Tweakable and move final to the costructor of the class
-        self.threshold_keep_movie = 1
-        self.high_similarity_treshold = 0.55
-        self.low_similarity_threshold = 0.40
+        logger.info("Review phase for user %d" % rated.user)
 
         sum_similarity = 0
         # Fill feedback of recommendations
@@ -190,37 +210,41 @@ class MovieRecommender(MovieRecommenderInterface):
             rat = self.cb.get_mean_user_rating(rec.user)
 
             sum_similarity = sum_similarity + sim
-            print('Mean rating is %f and similarity is %f' % (rat, sim))
+            logger.info('Mean rating is %f and similarity is %f' % (rat, sim))
 
             if rec.movie == rated.movie and rated.rating > self.cb.get_mean_user_rating(rec.user):
-                print "Recommended movie %d is the same - Good rating" % rec.movie
+                logger.info("Recommended movie %d is the same - Good rating" % rec.movie)
                 rec.feedback = FeedbackType.GOOD
 
             elif rec.movie == rated.movie and rated.rating <= self.cb.get_mean_user_rating(rec.user):
-                print "Recommended movie %d was the same - Bad rating" % rec.movie
+                logger.info("Recommended movie %d was the same - Bad rating" % rec.movie)
                 rec.feedback = FeedbackType.BAD
 
             elif sim > self.movie_thresh:
 
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    print "Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie)
+                    logger.info("Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.GOOD
                 else:
-                    print "Movie %d is similar to %s - Bad rating" % (rec.movie, rated.movie)
+                    logger.info("Movie %d is similar to %s - Bad rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.BAD
             else:
                 # Movie is different
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    print "Movie %d is not similar to %s - Good rating" % (rec.movie, rated.movie)
+                    logger.info("Movie %d is not similar to %s - Good rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.BAD
                 else:
-                    print "Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie)
+                    logger.info("Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.NEUTRAL
 
-        mean_similarity = float (sum_similarity / len(recommended))
-        """ Place for adding deciding point for retaining / not retaining case, should use similarities caluclated and mean rating !"""
-        # bool value for retaining or not retaining the case
-        retain_rated_case = (abs(rated.rating - self.cb.get_mean_movie_rating(rated.movie)) > self.threshold_keep_movie) and (mean_similarity > self.threshold.high_similarity_treshold  or mean_similarity < self.threshold.low_similarity_threshold)
+        # Compute mean similarity of recommendations
+        mean_similarity = float(sum_similarity / len(recommended))
+
+        # Check rating and mean similarity differs from expecteed values
+        rating_diff_bool = abs(rated.rating - self.cb.get_mean_movie_rating(rated.movie)) > self.threshold_keep_movie
+        non_redundant_bool = (mean_similarity > self.high_similarity_treshold) or \
+                             (mean_similarity < self.low_similarity_threshold)
+        retain_rated_case = rating_diff_bool and non_redundant_bool
 
         return recommended, retain_rated_case
 
@@ -233,25 +257,21 @@ class MovieRecommender(MovieRecommenderInterface):
            retain_rated_case: True / False value for saving the case to the CaseBase
        """
 
-        if (retain_rated_case):
-            self.N = self.N + 1
+        if retain_rated_case:
+
+            self.N += 1
             self.case_to_add.append(rated_case)
 
-            if (self.N == self.update_value):
-                users = []
-                movies = []
-                ratings = []
-                timestamps = []
-                for c in self.case_to_add:
-                    # Add case information to the lists
-                    users.append(c.user)
-                    movies.append(c.movie)
-                    ratings.append(c.rating)
-                    timestamps.append(c.timestamp)
+            if self.N == self.update_value:
 
-                # Add N cases to the CaseBase and update CaseBase
-                frame = pd.DataFrame({'user_id': users, 'movie_id': movies, 'rating': ratings, 'timestamp': timestamps})
-                self.cb.ratings = pd.concat([self.cb.ratings, frame], ignore_index=True)
+                # Collect data for cases to
+                users = [c.user for c in self.case_to_add]
+                movies = [c.movie for c in self.case_to_add]
+                ratings = [c.rating for c in self.case_to_add]
+                timestamps = [c.timestamp for c in self.case_to_add]
+
+                # Update case base
+                self.cb.update_case_base(users, movies, ratings, timestamps)
 
                 # Reset values and empty rated case list
                 self.N = 0
@@ -261,15 +281,15 @@ class MovieRecommender(MovieRecommenderInterface):
                 self.cb.update_popularity()
                 self.cb.update_mean_movie_rating()
                 self.cb.update_mean_user_rating()
-                print "Updating the CaseBase with cases"
+                logger.info("Updating case base with retained information")
 
         user_id = rated_case.user
-        print "Retaining phase for user %d" % user_id
+        logger.info("Retaining phase for user %d" % user_id)
 
         for c in feedback_list:
-           # Updating genre willignes of user_id depening on CandidateInfo object that was reviewed
-           self.cb.update_genre_willigness(user_id, c)
-           # Updating user affinity of user_id
-           self.cb.update_user_affinity(user_id, c)
+            # Updating genre willingness of user_id depending on CandidateInfo object that was reviewed
+            self.cb.update_genre_willigness(user_id, c)
+            # Updating user affinity of user_id
+            self.cb.update_user_affinity(user_id, c)
 
         return
