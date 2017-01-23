@@ -35,6 +35,7 @@ class CandidateInfo(object):
             string += ' ' + str(g) + ' |'
         return string
 
+
 class RatingInfo(object):
 
     """ Represents the feedback of the recommendation of a movie from a certain user

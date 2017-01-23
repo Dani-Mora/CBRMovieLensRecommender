@@ -2,6 +2,8 @@ from utils import *
 from case_base import CaseBase
 from movies import FeedbackType
 
+logger = get_logger()
+
 class MovieRecommenderInterface(object):
 
     """ Interface for Movie Recommender """
@@ -231,6 +233,8 @@ class MovieRecommender(MovieRecommenderInterface):
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
+        logger.info("Retrieved neighbors: {}".format(neighbors))
+
         if len(neighbors) == 0:
             # If no neighbors found, return popular movies
             unique_recommendations = self.cb.get_popular_candidates(user_id)
@@ -248,6 +252,10 @@ class MovieRecommender(MovieRecommenderInterface):
             for m in movies:
                 dict_candidate[m.movie] = m
             unique_recommendations = dict_candidate.values()
+
+        # Debugging
+        for i in unique_recommendations:
+            print(i)
 
         # Return top movies
         return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:self.rec_movies]

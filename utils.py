@@ -18,17 +18,28 @@ MOVIELENS1M_URL = 'http://files.grouplens.org/datasets/movielens/ml-1m.zip'
 LOG_CONFIG = os.path.join(os.path.dirname(__file__), 'logs/logging.conf')
 LOG_OUT = os.path.join(os.path.dirname(__file__), 'logs/output.log')
 
+logger = None
 
-## Logging
 
 def initialize_logging(name):
     """ Initializes logging with the default configuration and the
     output where to store the logs. Set to None to disable storing into file
      :param name: Name of the logger to initialize """
     logging.config.fileConfig(LOG_CONFIG, defaults={'logfilename': LOG_OUT})
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    logger.propagate = False
+    return logger
 
-logger = initialize_logging('utils')
+
+def get_logger(name='cbr'):
+    """ Returns logger instance """
+    global logger
+    if logger is None:
+        logger = initialize_logging(name)
+    return logger
+
+
+logger = get_logger()
 
 
 ## Utility functions

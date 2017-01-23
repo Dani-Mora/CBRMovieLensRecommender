@@ -6,8 +6,7 @@ from scipy import stats
 from movies import RatingInfo, CandidateInfo
 import random
 
-logger = initialize_logging('casebase')
-
+logger = get_logger()
 
 class CaseBase(object):
 
@@ -194,14 +193,6 @@ class CaseBase(object):
         # Sort test ratings so they are grouped by the user they belong to
         self.test_ratings = self.test_ratings.sort_values(['user_id'])
 
-        # Iterate over all users
-        '''users = self._get_users_list()
-        for u_id in tqdm(users, desc="Initializing user information"):
-
-            # Fill inverted file index with user movies
-            for m_id in self._get_user_movies(u_id, list=True):
-                self.add_user_rating(u_id, m_id)'''
-
         # Compute global structures
         logger.info("Initializing movie popularity ...")
         self.update_popularity()
@@ -254,13 +245,6 @@ class CaseBase(object):
     def _get_users_list(self):
         """ Returns the list of user identifiers """
         return self.users['user_id'].tolist()
-
-
-    '''def add_user_rating(self, user_id, movie_id):
-        """ Adds a user rating to the inverted file indexed structure """
-        if movie_id not in self.inverted_file:
-            self.inverted_file[movie_id] = []
-        self.inverted_file[movie_id].append(user_id)'''
 
 
     def _find_users_by_movies(self, movie_id):
@@ -327,7 +311,7 @@ class CaseBase(object):
         Args:
             user_id: User identifier
             num_movies: Number of interest movies to user for the user
-            min_neighs: Minimum number of users to compute
+            num_neighs: Minimum number of users to compute
             max_k: Maximum number of interest movies to be shared between neighbors
             min_k: Minimum number of interest movies to be shared between neighbors
             sim_thresh: Maximum rating distance between movies to be considered shared between two users
@@ -347,7 +331,6 @@ class CaseBase(object):
             # Get neighbors for current k
             neighbors_k = set(self._get_neighbors(user_id, list_films, current_k, sim_thresh))
             neighbors_k -= set([user_id])
-            #logger.info("Neighbors for {} are {}".format(current_k, neighbors_k))
 
             # Compute union with previous ones
             total_neighs = total_neighs.union(neighbors_k)
@@ -379,22 +362,14 @@ class CaseBase(object):
             saw_movie = set(self._find_users_by_movies(m))
             users_seen = saw_movie if users_seen is None else users_seen.intersection(saw_movie)
 
-        #logger.info('[K={}] Neighbors who saw all movies for {}'.format(current_k, users_seen))
-
         # Check whether any of the users have correlation
         candidates = []
         for u in users_seen:
 
-            #logger.info('Neighbor {}'.format(u))
-
             # Check if any of the K ratings differ from the maximum interval allowed
             selected = True
             for m, r in zip(k_movies, k_ratings):
-                diff = abs(r - self._get_user_movie_rating(u, m))
-                #print('Movie {}, neighbor {}. Rating user {}, rating neighbor {}. Difference {}, Thresh {}'
-                #      .format(m, u, r, self._get_user_movie_rating(u, m), diff, sim_thresh))
                 if abs(r - self._get_user_movie_rating(u, m)) > sim_thresh:
-                #    logger.info('Neighbor {} discarded'.format(u))
                     selected = False
                     break
 
