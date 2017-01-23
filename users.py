@@ -58,8 +58,8 @@ class AffinityCaseBase:
     def update_preference(self, elem1, elem2, feedback):
         """ Modifies the preference of element elem1 towards elem2
         Args:
-            user1: First element of the preference relation
-            user2: Second element of the preference relation
+            elem1: First element of the preference relation
+            elem2: Second element of the preference relation
             feedback: Enumerateed feedback of the affinity. Positive feedback are good
                 while feedback below 0 represents a bad affinity update """
 

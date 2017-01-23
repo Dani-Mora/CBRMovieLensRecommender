@@ -13,7 +13,8 @@ class CandidateInfo(object):
 
     """ Represents a candidate movie recommended from a certain user in the neighborhood """
 
-    def __init__(self, name, movie_id, user_id, neighbor_id_rated, score, genres, genre_representation, feedback=FeedbackType.NEUTRAL):
+    def __init__(self, name, movie_id, user_id, neighbor_id_rated, score, genres,
+                 genre_representation, feedback=FeedbackType.NEUTRAL):
         """ Constructs a movie candidate from the ids of the user and the movie """
         self.name = name
         self.movie = movie_id
@@ -25,7 +26,7 @@ class CandidateInfo(object):
         self.feedback = feedback
 
     def __repr__(self):
-        return ("Movie candidate : " + str(self.name) + ", movie genres: " +
+        return ("Movie candidate (" + str(self.movie) +"): " + str(self.name) + ", movie genres: " +
             self._get_representation())
 
 

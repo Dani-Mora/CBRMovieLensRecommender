@@ -8,6 +8,7 @@ import random
 
 logger = get_logger()
 
+
 class CaseBase(object):
 
     def __init__(self,
@@ -61,7 +62,7 @@ class CaseBase(object):
 
         # User's neighbor caching for user affinity
         # Key is user ID, value is list of neighbor IDs
-        self.user_neighbors = {}
+        #self.user_neighbors = {}
 
         # User similarity caching
         self.user_cache = {}
@@ -379,18 +380,9 @@ class CaseBase(object):
         return candidates
 
 
-    def save_user_neighbors(self, user_id, neighbors):
+    '''def save_user_neighbors(self, user_id, neighbors):
         """ Method saves the users from reuse phase to the case base with key user_id """
-        self.user_neighbors[user_id] = neighbors
-
-
-    def _get_user_affinity(self, user_id):
-        """ Returns the user_affinity vector to his neighbors for the given user """
-        neighbors = self.user_neighbors[user_id]
-        aff_vec = np.zeros(len(neighbors))
-        for index, neighbor in enumerate(neighbors):
-            aff_vec[index] = self.user_affinity.get_affinity(user_id, neighbor)
-        return aff_vec
+        self.user_neighbors[user_id] = neighbors'''
 
 
     def _get_movie_name(self, movie_id):
@@ -402,13 +394,19 @@ class CaseBase(object):
         """ Function updates user_affinity with given feedback
         Args:
             user_id: Identifier of the user
-            candidate_with_feedback: CandidateInfo object containg information about the movie
+            candidate_with_feedback: CandidateInfo object containing information about the movie
                 candidate with given feedback
         """
         # Update only user's neighbor that is Candidate with feedback
-        for index, neighbor in enumerate(self.user_neighbors[user_id]):
-            if neighbor == candidate_with_feedback.neighbor_id_rated:
-                self.user_affinity.update_preference(user_id, neighbor, candidate_with_feedback.feedback)
+        neigh = candidate_with_feedback.neighbor_id_rated
+        logger.info("User willigness. Before was: {}".format(self.user_affinity.get_affinity(user_id, neigh)))
+        #for index, neighbor in enumerate(self.user_neighbors[user_id]):
+        #    if neighbor == candidate_with_feedback.neighbor_id_rated:
+        #        self.user_affinity.update_preference(user_id, neighbor, candidate_with_feedback.feedback)
+        self.user_affinity.update_preference(elem1=user_id,
+                                             elem2=neigh,
+                                             feedback=candidate_with_feedback.feedback)
+        logger.info("User willigness. After is: {}".format(self.user_affinity.get_affinity(user_id, neigh)))
 
 
     """ Movie-related functions """
@@ -503,7 +501,7 @@ class CaseBase(object):
         # Count of users rated both movies
         rated_both = len(u_i.intersection(u_j))
         min_rated = min(len(u_i), len(u_j))
-        term_1 = (float(rated_both) / float(min_rated))
+        term_1 = 0.0 if min_rated == 0.0 else (float(rated_both) / float(min_rated))
 
         # Fastest numpy array initialization
         ratings_mi = np.empty(rated_both)
@@ -553,6 +551,9 @@ class CaseBase(object):
             candidate_with_feedback: CandidateInfo object containg information about the movie
                 candidate with given feedback
         """
+        will_list = [self.genre_willigness.get_affinity(user_id, i) for i in self.genres]
+        logger.info("Genre names: {}".format(self.genres))
+        logger.info("Genre willigness. Before was: {}".format(will_list))
         genres = self._get_genre_vector(candidate_with_feedback.movie, list=True)
         genre_indices = [i for i, x in enumerate(genres) if x]
         # Update only genres of candidate_with_feedback movie

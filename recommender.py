@@ -52,7 +52,7 @@ class MovieRecommender(MovieRecommenderInterface):
 
     def __init__(self,
                  path,
-                 movies_per_neighbor=10,
+                 movies_per_neighbor=3,
                  rec_movies=5,
                  initial_affinity=0.5,
                  update_rate=0.1,
@@ -227,8 +227,8 @@ class MovieRecommender(MovieRecommenderInterface):
         """ See base class """
 
         # Save user's neighbors in CaseBase for user_affinity
-        neighbor_id_list = [(n[0]) for n in neighbors]
-        self.cb.save_user_neighbors(user_id, neighbor_id_list)
+        #neighbor_id_list = [(n[0]) for n in neighbors]
+        #self.cb.save_user_neighbors(user_id, neighbor_id_list)
 
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
@@ -347,13 +347,13 @@ class MovieRecommender(MovieRecommenderInterface):
                 self.cb.update_mean_user_rating()
                 logger.info("Updating case base with retained information")
 
-        user_id = rated_case.user
-        logger.info("Retaining phase for user %d" % user_id)
+            user_id = rated_case.user
+            logger.info("Retaining phase for user %d" % user_id)
 
-        for c in feedback_list:
-            # Updating genre willingness of user_id depending on CandidateInfo object that was reviewed
-            self.cb.update_genre_willigness(user_id, c)
-            # Updating user affinity of user_id
-            self.cb.update_user_affinity(user_id, c)
+            for c in feedback_list:
+                # Updating genre willingness of user_id depending on CandidateInfo object that was reviewed
+                self.cb.update_genre_willigness(user_id, c)
+                # Updating user affinity of user_id
+                self.cb.update_user_affinity(user_id, c)
 
         return
