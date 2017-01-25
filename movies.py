@@ -26,8 +26,11 @@ class CandidateInfo(object):
         self.feedback = feedback
 
     def __repr__(self):
-        return ("Movie candidate (" + str(self.movie) +"): " + str(self.name) + ", movie genres: " +
-            self._get_representation())
+        return ("Movie candidate " +
+                "(" + str(self.movie) + "): "
+                + str(self.name)
+                + ", score:  " + str(self.score) + ", "
+                + "movie genres: " + self._get_representation())
 
 
     def _get_representation(self):

@@ -57,10 +57,10 @@ class MovieRecommender(MovieRecommenderInterface):
                  initial_affinity=0.5,
                  update_rate=0.1,
                  alpha=0.25,
-                 beta=0.15,
-                 gamma=0.20,
-                 theta=0.1,
-                 omega=0.1,
+                 beta=0.05,
+                 gamma=0.55,
+                 theta=0.15,
+                 omega=0.15,
                  train_ratio=0.8,
                  shared_movies=8,
                  max_neighbors=5,
@@ -71,7 +71,7 @@ class MovieRecommender(MovieRecommenderInterface):
                  movie_threshold=0.40,
                  high_similarity_treshold=0.55,
                  low_similarity_threshold=0.40,
-                 update_value=5,
+                 update_value=1,
                  ratings_ratio=1.0):
         """ Constructor of the class
         Args:
@@ -143,10 +143,6 @@ class MovieRecommender(MovieRecommenderInterface):
         sim_users = self.retrieve(rated.user)  # Retrieves a set of user ids
         sim_movies = self.reuse(rated.user, neighbors=sim_users)  # Set of MovieInfo
 
-        logger.debug("Movies recommended for user %d" % rated.user)
-        for m in sim_movies:
-            logger.debug(m)
-
         feedback, retain_rated_case, _ = self.review(rated, sim_movies)
         self.retain(rated, feedback, retain_rated_case)
 
@@ -177,9 +173,6 @@ class MovieRecommender(MovieRecommenderInterface):
 
             # REUSE phase: get set of candidate movies
             sim_movies = self.reuse(rated.user, neighbors=sim_users)
-            #logger.debug("Movies recommended for user %d" % rated.user)
-            #for m in sim_movies:
-            #    logger.debug(m)
 
             # REVIEW phase: compare recommendations to rated movie
             feedback, retain_rated_case, mean_sim = self.review(rated, sim_movies)
@@ -214,11 +207,11 @@ class MovieRecommender(MovieRecommenderInterface):
                                                  sim_thresh=self.max_sim_threshold)
 
         # Get shared movies and correlation for candidates
-        logger.info("Obtaining user similarities (%d)" % len(candidates))
+        logger.info("Computing user similarities for %d users" % len(candidates))
         stats = [(c_id, self.cb.get_user_similarity(user_id, c_id)) for c_id in candidates]
 
         # Return top
-        logger.debug("Sorting user similarities")
+        logger.info("Sorting user similarities")
         sorted_stats = sorted(stats, key=lambda tup: tup[1], reverse=True)[:self.max_neighbors]
         return sorted_stats
 
@@ -229,7 +222,7 @@ class MovieRecommender(MovieRecommenderInterface):
         logger.info("Reuse phase for user %d" % user_id)
         movies = []
 
-        logger.info("Retrieved neighbors: {}".format(neighbors))
+        logger.info("Retrieved neighbors: {}".format([n[0] for n in neighbors]))
 
         if len(neighbors) == 0:
             # If no neighbors found, return popular movies
@@ -249,10 +242,6 @@ class MovieRecommender(MovieRecommenderInterface):
                 dict_candidate[m.movie] = m
             unique_recommendations = dict_candidate.values()
 
-        # Debugging
-        for i in unique_recommendations:
-            print(i)
-
         # Return top movies
         return sorted(unique_recommendations, key=lambda x: x.score, reverse=True)[:self.rec_movies]
 
@@ -261,44 +250,54 @@ class MovieRecommender(MovieRecommenderInterface):
         """ See base class """
         logger.info("Review phase for user %d" % rated.user)
 
+        # Print user preferences
+        genres = self.cb.genres
+        prefs = self.cb.get_user_preferences(rated.user)
+
+        # Get rated metadata
+        rated_name = self.cb._get_movie_name(rated.movie)
+        rat = self.cb.get_mean_user_rating(recommended[0].user)
+        logger.info("Rated movie {}({}) with {}, genres: {}"
+                    .format(rated_name, rated.movie, rated.rating, self.cb._get_genre_categories(rated.movie)))
+        logger.info("Mean rating of query user is %f, while mean movie rating for movie is %f"
+                    % (rat,  self.cb.get_mean_movie_rating(rated.movie)))
+
         sum_similarity = 0
         # Fill feedback of recommendations
         for rec in recommended:
 
             # Calculating movie similarity between rated movie and recommended movie
             sim = self.cb.get_movie_similarity(rec.movie, rec.genres, rated.movie, rated.genres)
-            rat = self.cb.get_mean_user_rating(rec.user)
 
             sum_similarity = sum_similarity + sim
-            logger.info('Mean rating is %f and similarity is %f' % (rat, sim))
 
             if rec.movie == rated.movie and rated.rating > self.cb.get_mean_user_rating(rec.user):
-                logger.info("Recommended movie %d is the same - Good rating" % rec.movie)
                 rec.feedback = FeedbackType.GOOD
 
             elif rec.movie == rated.movie and rated.rating <= self.cb.get_mean_user_rating(rec.user):
-                logger.info("Recommended movie %d was the same - Bad rating" % rec.movie)
                 rec.feedback = FeedbackType.BAD
 
             elif sim > self.movie_thresh:
 
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    logger.info("Movie %d is similar to %s - Good rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.GOOD
                 else:
-                    logger.info("Movie %d is similar to %s - Bad rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.BAD
             else:
                 # Movie is different
                 if rated.rating > self.cb.get_mean_user_rating(rec.user):
-                    logger.info("Movie %d is not similar to %s - Good rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.BAD
                 else:
-                    logger.info("Movie %d is not similar to %s - Bad rating" % (rec.movie, rated.movie))
                     rec.feedback = FeedbackType.NEUTRAL
+
+            logger.info("Recommended movie {}({}) has similarity {} with rated one. Feedback: {}"
+                        .format(rec.name, rec.movie, sim, rec.feedback))
+            logger.info("Movie {} has genres {}".format(rec.name, rec.genre_representation))
 
         # Compute mean similarity of recommendations
         mean_similarity = float(sum_similarity / len(recommended))
+
+        logger.info("Mean similarity of recommended movies and rated movies is %f" % mean_similarity)
 
         # Check rating and mean similarity differs from expecteed values
         rating_diff_bool = abs(rated.rating - self.cb.get_mean_movie_rating(rated.movie)) > self.threshold_keep_movie
@@ -314,6 +313,8 @@ class MovieRecommender(MovieRecommenderInterface):
 
         if retain_rated_case:
 
+            logger.info("Case added for retaining")
+
             self.N += 1
             self.case_to_add.append(rated_case)
 
@@ -325,6 +326,8 @@ class MovieRecommender(MovieRecommenderInterface):
                 ratings = [c.rating for c in self.case_to_add]
                 timestamps = [c.timestamp for c in self.case_to_add]
 
+                logger.info("Updating case base with cached retained information ...")
+
                 # Update case base
                 self.cb.update_case_base(users, movies, ratings, timestamps)
 
@@ -335,16 +338,17 @@ class MovieRecommender(MovieRecommenderInterface):
                 # Update CaseBase
                 self.cb.update_popularity()
                 self.cb.update_mean_movie_rating()
+
                 self.cb.update_mean_user_rating()
-                logger.info("Updating case base with retained information")
+        else:
+            logger.info("Case not retained")
 
-            user_id = rated_case.user
-            logger.info("Retaining phase for user %d" % user_id)
-
-            for c in feedback_list:
-                # Updating genre willingness of user_id depending on CandidateInfo object that was reviewed
-                self.cb.update_genre_willigness(user_id, c)
-                # Updating user affinity of user_id
-                self.cb.update_user_affinity(user_id, c)
+        logger.info("Updating user and genre willingness ...")
+        user_id = rated_case.user
+        for c in feedback_list:
+            # Updating genre willingness of user_id depending on CandidateInfo object that was reviewed
+            self.cb.update_genre_willigness(user_id, c)
+            # Updating user affinity of user_id
+            self.cb.update_user_affinity(user_id, c)
 
         return

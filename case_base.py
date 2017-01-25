@@ -17,7 +17,7 @@ class CaseBase(object):
                  update_rate=0.1,
                  alpha=0.20,
                  beta=0.10,
-                 gamma=0.25,
+                 gamma=0.40,
                  theta=0.25,
                  omega=0.10,
                  train_ratio=0.9,
@@ -249,7 +249,7 @@ class CaseBase(object):
         return self.ratings[self.ratings['movie_id'] == movie_id]['user_id'].tolist()
 
 
-    def _get_user_preferences(self, user_id):
+    def get_user_preferences(self, user_id):
         """ Sets the user genre preferences for the training set of movies
         Args:
             user_id: Identifier of the user
@@ -270,7 +270,8 @@ class CaseBase(object):
             mean_ratings[i] = movies_user[movies_user[g] == True]['rating'].mean()
 
         # Multiply and replace nans to 0
-        return np.nan_to_num(genres_sum_mat * mean_ratings)
+        cleared = np.nan_to_num(genres_sum_mat * mean_ratings)
+        return cleared / np.sum(cleared)
 
 
     def _get_genre_categories(self, movie_id):
@@ -376,11 +377,6 @@ class CaseBase(object):
         return candidates
 
 
-    '''def save_user_neighbors(self, user_id, neighbors):
-        """ Method saves the users from reuse phase to the case base with key user_id """
-        self.user_neighbors[user_id] = neighbors'''
-
-
     def _get_movie_name(self, movie_id):
         """ Return the name of the movie """
         return self.movies[self.movies['movie_id'] == movie_id]['name'].iloc[0]
@@ -395,14 +391,9 @@ class CaseBase(object):
         """
         # Update only user's neighbor that is Candidate with feedback
         neigh = candidate_with_feedback.neighbor_id_rated
-        logger.info("User willigness. Before was: {}".format(self.user_affinity.get_affinity(user_id, neigh)))
-        #for index, neighbor in enumerate(self.user_neighbors[user_id]):
-        #    if neighbor == candidate_with_feedback.neighbor_id_rated:
-        #        self.user_affinity.update_preference(user_id, neighbor, candidate_with_feedback.feedback)
         self.user_affinity.update_preference(elem1=user_id,
                                              elem2=neigh,
                                              feedback=candidate_with_feedback.feedback)
-        logger.info("User willigness. After is: {}".format(self.user_affinity.get_affinity(user_id, neigh)))
 
 
     """ Movie-related functions """
@@ -544,18 +535,12 @@ class CaseBase(object):
         """ Function updates genre_willigness with given feedback
         Args:
             user_id: Identifier of the user.
-            candidate_with_feedback: CandidateInfo object containg information about the movie
+            candidate_with_feedback: CandidateInfo object containing information about the movie
                 candidate with given feedback
         """
-        will_list = [self.genre_willigness.get_affinity(user_id, i) for i in self.genres]
-        logger.info("Genre names: {}".format(self.genres))
-        logger.info("Genre willigness. Before was: {}".format(will_list))
-        genres = self._get_genre_vector(candidate_with_feedback.movie, list=True)
-        genre_indices = [i for i, x in enumerate(genres) if x]
-        # Update only genres of candidate_with_feedback movie
-        for index, genre in enumerate(self.genres):
-            if index in genre_indices:
-                self.genre_willigness.update_preference(user_id, genre, candidate_with_feedback.feedback)
+        genres = self._get_genre_categories(candidate_with_feedback.movie)
+        for g in genres:
+            self.genre_willigness.update_preference(user_id, g, candidate_with_feedback.feedback)
 
 
     """ Similarity functions """
@@ -643,9 +628,10 @@ class CaseBase(object):
         # Compute score
         user_term = self.alpha * self.get_user_similarity(user_id, neigh_id) * self._get_user_movie_rating(neigh_id, movie_id)
         rating_term = self.beta * self.get_mean_movie_rating(movie_id)
-        genre_term = self.gamma * np.dot(self._get_user_preferences(user_id), movie_genres)
+        genre_term = self.gamma * np.dot(self.get_user_preferences(user_id), movie_genres)
         will_term = self.theta * np.dot(self._get_willingness_vector(user_id), movie_genres)
         will_user_term = self.omega * self.user_affinity.get_affinity(user_id, neigh_id)
+
         score = user_term + rating_term + genre_term + will_term + will_user_term
 
         return CandidateInfo(name=name,
